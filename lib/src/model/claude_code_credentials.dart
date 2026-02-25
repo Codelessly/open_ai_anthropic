@@ -27,7 +27,7 @@ class ClaudeCodeCredentials {
 
   /// Whether the access token is expired.
   /// Includes a buffer to proactively refresh tokens before they actually expire.
-  bool get isExpired => DateTime.timestamp().difference(expiresAt) <= expirationBuffer;
+  bool get isExpired => expiresAt.toUtc().difference(DateTime.timestamp()) <= expirationBuffer;
 
   Duration get expirationBuffer => Duration(minutes: 5);
 
