@@ -39,6 +39,18 @@ class ClaudeCodeCredentials {
     this.tokenType = 'Bearer',
   });
 
+  factory ClaudeCodeCredentials.fromToken(
+    String token, {
+    String tokenType = 'Bearer',
+    String? refreshToken,
+    DateTime? expiresAt,
+  }) => ClaudeCodeCredentials(
+    accessToken: token,
+    refreshToken: refreshToken ?? '',
+    expiresAt: expiresAt ?? DateTime.timestamp().add(Duration(hours: 1)),
+    tokenType: tokenType,
+  );
+
   /// Custom JSON reader for 'expires_at' field.
   /// Handles different formats: int (epoch ms), String (ISO 8601), or derives from 'expires_in'.
   /// If neither is present, returns null.

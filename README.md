@@ -20,3 +20,51 @@ Then run `flutter pub get` or `dart pub get` to install the package.
 
 Use `AnthropicOpenAIClient` class instead of `OpenAIClient` and the rest of the OpenAI API remains the same. Refer
 [`openai_dart`](https://pub.dev/packages/openai_dart) package documentation for more details on how to use the OpenAI API.
+
+```dart
+final apiKey = Platform.environment['ANTHROPIC_API_KEY'];
+final client = AnthropicOpenAIClient(apiKey: apiKey);
+```
+
+### Chat
+
+```dart
+final res = await client.createChatCompletion(
+  request: CreateChatCompletionRequest(
+    model: ChatCompletionModel.modelId('gpt-5'),
+    messages: [
+      ChatCompletionMessage.developer(
+        content: 'You are a helpful assistant.',
+      ),
+      ChatCompletionMessage.user(
+        content: ChatCompletionUserMessageContent.string('Hello!'),
+      ),
+    ],
+  ),
+);
+print(res.choices.first.message.content);
+// Hello! How can I assist you today?
+```
+
+Refer [`openai_dart`](https://pub.dev/packages/openai_dart) package documentation for more details on how to use the OpenAI API.
+
+### Using Claude Code Client
+
+```dart
+// Using credentials JSON from env.
+final credentialsJson = Platform.environment['CLAUDE_CODE_CREDENTIALS'];
+final credentials = ClaudeCodeCredentials.fromJson(jsonDecode(credentialsJson!));
+final client = ClaudeCodeOpenAIClient(credentials: credentials);
+```
+You can also pass a `tokenStore` instead of `credentials` for more control over how tokens are stored and refreshed. To
+do so, extend `ClaudeCodeTokenStore` and implement the required methods.
+
+How to use long-lived access token:
+
+You can generate a long-lived access token by running `claude setup-token` command.
+
+```dart
+final token = Platform.environment['CLAUDE_CODE_TOKEN'];
+final credentials = ClaudeCodeCredentials.fromToken(token);
+final client = ClaudeCodeOpenAIClient(credentials: credentials);
+```
