@@ -18,10 +18,22 @@ Then run `flutter pub get` or `dart pub get` to install the package.
 
 ## Usage
 
+### Generating OAuth credentials
+
+Run following command to start the OAuth flow and generate credentials JSON. 
+Follow the instructions in the terminal to complete the flow. 
+This will generate a `claude_code_credentials.json` file in the current directory as well as print the credentials 
+JSON in the terminal which you can set as an environment variable.
+```console
+dart pub run openai_anthropic:generate
+```
+
 Use `AnthropicOpenAIClient` class instead of `OpenAIClient` and the rest of the OpenAI API remains the same. Refer
 [`openai_dart`](https://pub.dev/packages/openai_dart) package documentation for more details on how to use the OpenAI API.
 
 ```dart
+import 'package:openai_anthropic/openai_anthropic.dart';
+
 final apiKey = Platform.environment['ANTHROPIC_API_KEY'];
 final client = AnthropicOpenAIClient(apiKey: apiKey);
 ```
@@ -67,4 +79,29 @@ You can generate a long-lived access token by running `claude setup-token` comma
 final token = Platform.environment['CLAUDE_CODE_TOKEN'];
 final credentials = ClaudeCodeCredentials.fromToken(token);
 final client = ClaudeCodeOpenAIClient(credentials: credentials);
+```
+
+### Refreshing OAuth tokens
+
+```dart
+/// Refresh access token using refresh token
+static Future<Map<String, dynamic>> refreshAccessToken(String refreshToken) async {
+  final response = await http.post(
+    Uri.parse(ClaudeOAuthConfig.tokenUrl),
+    headers: ClaudeOAuthConfig.defaultHeaders,
+    body: jsonEncode({
+      'grant_type': 'refresh_token',
+      'client_id': ClaudeOAuthConfig.clientId,
+      'refresh_token': refreshToken,
+    }),
+  );
+
+  if (response.statusCode != 200) {
+    throw Exception('Token refresh failed: ${response.body}');
+  }
+
+  final Map<String, dynamic> tokens = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  tokens['expires_at'] = DateTime.timestamp().add(Duration(seconds: tokens['expires_in'])).millisecondsSinceEpoch;
+  return tokens;
+}
 ```
