@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:http/http.dart' as http;
+import 'package:http/retry.dart';
 import 'package:meta/meta.dart';
 import 'package:openai_dart/openai_dart.dart';
 
@@ -36,29 +37,9 @@ class AnthropicOpenAIClient extends OpenAIClient {
   final ChatCompletionRequestConverter _requestConverter;
   final ChatCompletionResponseConverter _responseConverter;
 
-  final String? _anthropicApiKey;
-
-  String? get anthropicApiKey => _anthropicApiKey;
-
-  final String? _anthropicBaseUrl;
-
-  String? get anthropicBaseUrl => _anthropicBaseUrl;
-
-  final Map<String, String>? _anthropicHeaders;
-
-  Map<String, String>? get anthropicHeaders => _anthropicHeaders;
-
-  final Map<String, dynamic>? _anthropicQueryParams;
-
-  Map<String, dynamic>? get anthropicQueryParams => _anthropicQueryParams;
-
   final int _anthropicRetries;
 
   int get anthropicRetries => _anthropicRetries;
-
-  final http.Client? _httpClient;
-
-  http.Client? get httpClient => _httpClient;
 
   /// Creates a new AnthropicOpenAIClient.
   ///
@@ -70,41 +51,28 @@ class AnthropicOpenAIClient extends OpenAIClient {
   /// - [retries]: Number of retries for failed requests (default: 3).
   /// - [client]: Optional custom HTTP client.
   AnthropicOpenAIClient({
-    String? apiKey,
-    String? baseUrl,
-    Map<String, String>? headers,
-    Map<String, dynamic>? queryParams,
-    int retries = 3,
+    super.apiKey,
+    super.baseUrl = 'https://api.anthropic.com/v1',
+    super.headers,
+    super.queryParams,
+    super.retries,
     http.Client? client,
-  })  : _anthropicApiKey = apiKey,
-        _anthropicBaseUrl = baseUrl,
-        _anthropicHeaders = headers,
-        _anthropicQueryParams = queryParams,
-        _anthropicRetries = retries,
-        _httpClient = client,
-        _requestConverter = ChatCompletionRequestConverter(),
-        _responseConverter = ChatCompletionResponseConverter(),
-        super(
-          // Pass empty values to parent - we won't use its HTTP client
-          apiKey: '',
-          baseUrl: 'https://api.anthropic.com/v1',
-          headers: headers,
-          queryParams: queryParams,
-          retries: retries,
-          client: client,
-        ) {
+  }) : _anthropicRetries = retries,
+       _requestConverter = ChatCompletionRequestConverter(),
+       _responseConverter = ChatCompletionResponseConverter(),
+       super(client: client != null ? RetryClient(client, retries: retries) : null) {
     _anthropicClient = buildAnthropicClient();
   }
 
   @protected
   anthropic.AnthropicClient buildAnthropicClient() => anthropic.AnthropicClient(
-        apiKey: _anthropicApiKey,
-        baseUrl: _anthropicBaseUrl,
-        headers: _anthropicHeaders,
-        queryParams: _anthropicQueryParams,
-        retries: _anthropicRetries,
-        client: _httpClient,
-      );
+    apiKey: apiKey,
+    baseUrl: baseUrl,
+    headers: headers,
+    queryParams: queryParams,
+    retries: _anthropicRetries,
+    client: client,
+  );
 
   /// Creates a chat completion.
   ///
@@ -244,9 +212,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     final request = anthropic.CreateMessageRequest(
       model: anthropic.Model.modelId(model),
       maxTokens: maxTokens,
-      system: systemPrompt != null
-          ? anthropic.CreateMessageRequestSystem.text(systemPrompt)
-          : null,
+      system: systemPrompt != null ? anthropic.CreateMessageRequestSystem.text(systemPrompt) : null,
       messages: [
         anthropic.Message(
           role: anthropic.MessageRole.user,

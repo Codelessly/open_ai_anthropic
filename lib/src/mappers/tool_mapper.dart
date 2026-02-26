@@ -5,6 +5,14 @@ import 'package:openai_dart/openai_dart.dart';
 
 /// Maps tools and tool calls between OpenAI and Anthropic formats.
 class ToolMapper {
+  /// Ensures the input schema has the required 'type' field for the
+  /// Anthropic API, which rejects custom tools without `input_schema.type`.
+  static Map<String, dynamic> _ensureValidSchema(Map<String, dynamic>? schema) {
+    if (schema == null || schema.isEmpty) return {'type': 'object'};
+    if (!schema.containsKey('type')) return {'type': 'object', ...schema};
+    return schema;
+  }
+
   /// Converts OpenAI tools to Anthropic tools.
   List<anthropic.Tool>? toAnthropic(List<ChatCompletionTool>? tools) {
     if (tools == null || tools.isEmpty) return null;
@@ -14,7 +22,7 @@ class ToolMapper {
       return anthropic.Tool.custom(
         name: function.name,
         description: function.description,
-        inputSchema: function.parameters ?? {'type': 'object'},
+        inputSchema: _ensureValidSchema(function.parameters),
       );
     }).toList();
   }
