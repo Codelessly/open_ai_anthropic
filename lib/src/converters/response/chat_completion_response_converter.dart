@@ -4,6 +4,8 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
+import '../request/chat_completion_request_converter.dart'
+    show jsonSchemaToolName;
 
 /// Converts Anthropic message responses to OpenAI chat completion responses.
 class ChatCompletionResponseConverter {
@@ -18,9 +20,29 @@ class ChatCompletionResponseConverter {
     anthropic.Message anthropicMessage,
     String requestModel,
   ) {
-    final textParts = anthropicMessage.textBlocks.map((b) => b.text).toList();
-    final textContent = textParts.isEmpty ? null : textParts.join('\n');
+    // Check if the response contains a JSON schema tool call (structured output).
+    final jsonSchemaToolUse = anthropicMessage.toolUseBlocks
+        .where((b) => b.name == jsonSchemaToolName)
+        .firstOrNull;
+
+    String? textContent;
+    if (jsonSchemaToolUse != null) {
+      // The structured output is in the tool's input — surface it as text content.
+      textContent = jsonEncode(jsonSchemaToolUse.input);
+    } else {
+      final textParts =
+          anthropicMessage.textBlocks.map((b) => b.text).toList();
+      textContent = textParts.isEmpty ? null : textParts.join('\n');
+    }
+
+    // Extract real tool calls (excluding the JSON schema tool).
     final toolCalls = _extractToolCalls(anthropicMessage);
+
+    // When JSON schema tool was used, the stop reason is "tool_use" but from
+    // the caller's perspective this is a normal text response → map to "stop".
+    final finishReason = jsonSchemaToolUse != null
+        ? ChatCompletionFinishReason.stop
+        : _stopReasonMapper.toOpenAI(anthropicMessage.stopReason);
 
     final assistantMessage = ChatCompletionMessage.assistant(
       content: textContent,
@@ -30,7 +52,7 @@ class ChatCompletionResponseConverter {
     final choice = ChatCompletionResponseChoice(
       index: 0,
       message: assistantMessage as ChatCompletionAssistantMessage,
-      finishReason: _stopReasonMapper.toOpenAI(anthropicMessage.stopReason),
+      finishReason: finishReason,
       logprobs: null, // Anthropic doesn't provide logprobs
     );
 
@@ -45,9 +67,12 @@ class ChatCompletionResponseConverter {
     );
   }
 
-  /// Extracts tool calls from Anthropic response content blocks.
-  List<ChatCompletionMessageToolCall>? _extractToolCalls(anthropic.Message message) {
+  /// Extracts tool calls from Anthropic response content blocks,
+  /// excluding the internal [jsonSchemaToolName] tool.
+  List<ChatCompletionMessageToolCall>? _extractToolCalls(
+      anthropic.Message message) {
     final toolCalls = message.toolUseBlocks
+        .where((toolUse) => toolUse.name != jsonSchemaToolName)
         .map(
           (toolUse) => ChatCompletionMessageToolCall(
             id: toolUse.id,

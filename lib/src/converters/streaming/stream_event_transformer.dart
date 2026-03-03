@@ -4,6 +4,8 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
+import '../request/chat_completion_request_converter.dart'
+    show jsonSchemaToolName;
 
 /// Transforms Anthropic MessageStreamEvents to OpenAI CreateChatCompletionStreamResponse.
 ///
@@ -118,7 +120,11 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     anthropic.MessageDeltaEvent event,
     _StreamState state,
   ) {
-    final finishReason = stopReasonMapper.toOpenAI(event.delta.stopReason);
+    // When JSON schema tool was used, the stop reason is "tool_use" but from
+    // the caller's perspective this is a normal text response → map to "stop".
+    final finishReason = state.jsonSchemaBlockIndices.isNotEmpty
+        ? ChatCompletionFinishReason.stop
+        : stopReasonMapper.toOpenAI(event.delta.stopReason);
 
     final outputTokens = event.usage.outputTokens;
     final usage = CompletionUsage(
@@ -153,6 +159,13 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     return switch (block) {
       anthropic.TextBlock() || anthropic.ThinkingBlock() || anthropic.RedactedThinkingBlock() => [],
       anthropic.ToolUseBlock(:final id, :final name) => () {
+        // JSON schema tool is an internal implementation detail — surface its
+        // output as text content deltas instead of tool call chunks.
+        if (name == jsonSchemaToolName) {
+          state.jsonSchemaBlockIndices.add(event.index);
+          return <CreateChatCompletionStreamResponse>[];
+        }
+
         final toolCallIndex = state.toolCallCount++;
         state.blockToolCallIndex[event.index] = toolCallIndex;
 
@@ -216,6 +229,17 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
         ),
       ],
       anthropic.InputJsonDelta(:final partialJson) => () {
+        // If this delta belongs to a JSON schema tool block, surface it as
+        // text content instead of tool call arguments.
+        if (state.jsonSchemaBlockIndices.contains(event.index)) {
+          return [
+            _createResponse(
+              state: state,
+              delta: ChatCompletionStreamResponseDelta(content: partialJson),
+            ),
+          ];
+        }
+
         final toolCallIndex = _getToolCallIndex(state, event.index);
         if (toolCallIndex == null) {
           return <CreateChatCompletionStreamResponse>[];
@@ -256,7 +280,9 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     anthropic.ContentBlockStopEvent event,
     _StreamState state,
   ) {
-    // Content block stop doesn't need to emit anything in OpenAI format
+    state.blockToolCallIndex.remove(event.index);
+    // Note: jsonSchemaBlockIndices is NOT cleaned up here because
+    // _handleMessageDelta needs it to fix the finish reason.
     return [];
   }
 
@@ -303,6 +329,10 @@ class _StreamState {
   /// Maps content block index to its tool call index (only set for tool use blocks).
   final Map<int, int> blockToolCallIndex = {};
   int toolCallCount = 0;
+
+  /// Block indices that belong to the internal JSON schema tool.
+  /// Their input deltas are surfaced as text content, not tool call arguments.
+  final Set<int> jsonSchemaBlockIndices = {};
 
   _StreamState({required String requestModel})
     : messageId = 'chatcmpl-${DateTime.now().millisecondsSinceEpoch}',

@@ -6,7 +6,7 @@ import 'package:openai_dart/openai_dart.dart';
 /// Maps tools and tool calls between OpenAI and Anthropic formats.
 class ToolMapper {
   /// Builds an [anthropic.InputSchema] from a raw JSON schema map.
-  static anthropic.InputSchema _buildInputSchema(Map<String, dynamic>? schema) {
+  static anthropic.InputSchema buildInputSchema(Map<String, dynamic>? schema) {
     if (schema == null || schema.isEmpty) {
       return const anthropic.InputSchema(type: 'object');
     }
@@ -35,7 +35,7 @@ class ToolMapper {
         anthropic.Tool(
           name: function.name,
           description: function.description,
-          inputSchema: _buildInputSchema(function.parameters),
+          inputSchema: buildInputSchema(function.parameters),
         ),
       );
     }).toList();

@@ -5,6 +5,12 @@ import '../../mappers/tool_mapper.dart';
 import '../../utils/logger.dart';
 import 'message_content_converter.dart';
 
+/// Tool name used for JSON schema structured output via tool forcing.
+/// When a request includes `responseFormat: jsonSchema(...)`, we convert it
+/// to a tool with this name and force the model to call it, ensuring the
+/// output conforms to the provided schema.
+const String jsonSchemaToolName = '__json_response';
+
 /// Converts OpenAI chat completion requests to Anthropic create message requests.
 class ChatCompletionRequestConverter {
   final MessageContentConverter _messageConverter;
@@ -37,13 +43,36 @@ class ChatCompletionRequestConverter {
     final stopSequences = _convertStopSequences(request.stop);
 
     // Convert tools
-    final tools = _toolMapper.toAnthropic(request.tools);
+    var tools = _toolMapper.toAnthropic(request.tools);
 
     // Convert tool choice
-    final toolChoice = _toolMapper.toAnthropicToolChoice(
+    var toolChoice = _toolMapper.toAnthropicToolChoice(
       request.toolChoice,
       request.parallelToolCalls,
     );
+
+    // Convert responseFormat JSON schema to tool-based structured output.
+    // Anthropic doesn't have a native responseFormat; instead we create a
+    // tool with the schema and force the model to call it.
+    final responseFormat = request.responseFormat;
+    if (responseFormat is ResponseFormatJsonSchema) {
+      if (toolChoice != null) {
+        AnthropicOpenAILogger.warn(
+          'responseFormat jsonSchema overrides explicit toolChoice. '
+          'The model will be forced to call the structured output tool.',
+        );
+      }
+      final schema = responseFormat.jsonSchema.schema;
+      final jsonTool = anthropic.ToolDefinition.custom(
+        anthropic.Tool(
+          name: jsonSchemaToolName,
+          description: 'Output structured JSON response matching the required schema.',
+          inputSchema: ToolMapper.buildInputSchema(schema),
+        ),
+      );
+      tools = [...?tools, jsonTool];
+      toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
+    }
 
     return anthropic.MessageCreateRequest(
       model: model,
@@ -118,10 +147,15 @@ class ChatCompletionRequestConverter {
       'seed',
       request.seed,
     );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'response_format',
-      request.responseFormat,
-    );
+    // Only log response_format as unsupported when it's NOT jsonSchema
+    // (jsonSchema is handled via tool-based structured output).
+    if (request.responseFormat != null &&
+        request.responseFormat is! ResponseFormatJsonSchema) {
+      AnthropicOpenAILogger.logUnsupportedParam(
+        'response_format',
+        request.responseFormat,
+      );
+    }
     AnthropicOpenAILogger.logUnsupportedParam(
       'audio',
       request.audio,
