@@ -2,8 +2,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
-import 'package:http/http.dart' as http;
-import 'package:http/retry.dart';
 import 'package:meta/meta.dart';
 import 'package:openai_dart/openai_dart.dart';
 
@@ -56,23 +54,33 @@ class AnthropicOpenAIClient extends OpenAIClient {
     super.headers,
     super.queryParams,
     super.retries,
-    http.Client? client,
+    super.client,
   }) : _anthropicRetries = retries,
        _requestConverter = ChatCompletionRequestConverter(),
-       _responseConverter = ChatCompletionResponseConverter(),
-       super(client: client != null ? RetryClient(client, retries: retries) : null) {
+       _responseConverter = ChatCompletionResponseConverter() {
     _anthropicClient = buildAnthropicClient();
   }
 
+  /// Strips the `/v1` path segment from a base URL if present, since the new
+  /// SDK constructs resource paths (e.g. `/v1/messages`) internally.
+  static String normalizeAnthropicBaseUrl(String? baseUrl) {
+    final url = baseUrl ?? 'https://api.anthropic.com';
+    return url.endsWith('/v1') ? url.substring(0, url.length - 3) : url.replaceAll(RegExp(r'/v1/?$'), '');
+  }
+
   @protected
-  anthropic.AnthropicClient buildAnthropicClient() => anthropic.AnthropicClient(
-    apiKey: apiKey,
-    baseUrl: baseUrl,
-    headers: headers,
-    queryParams: queryParams,
-    retries: _anthropicRetries,
-    client: client,
-  );
+  anthropic.AnthropicClient buildAnthropicClient() {
+    return anthropic.AnthropicClient(
+      config: anthropic.AnthropicConfig(
+        authProvider: apiKey.isNotEmpty ? anthropic.ApiKeyProvider(apiKey) : null,
+        baseUrl: normalizeAnthropicBaseUrl(baseUrl),
+        defaultHeaders: headers,
+        defaultQueryParams: queryParams.map((k, v) => MapEntry(k, '$v')),
+        retryPolicy: anthropic.RetryPolicy(maxRetries: _anthropicRetries),
+      ),
+      httpClient: client,
+    );
+  }
 
   /// Creates a chat completion.
   ///
@@ -91,7 +99,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     final anthropicRequest = _requestConverter.convert(request);
 
     // Call Anthropic API
-    final anthropicResponse = await _anthropicClient.createMessage(request: anthropicRequest);
+    final anthropicResponse = await _anthropicClient.messages.create(anthropicRequest);
 
     // Convert Anthropic response to OpenAI response
     return _responseConverter.convert(anthropicResponse, requestModel);
@@ -130,13 +138,13 @@ class AnthropicOpenAIClient extends OpenAIClient {
     final transformer = StreamEventTransformer(requestModel: requestModel);
 
     // Call Anthropic streaming API and transform events
-    yield* _anthropicClient.createMessageStream(request: anthropicRequest).transform(transformer);
+    yield* _anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
   }
 
-  /// Closes the HTTP client and ends the session.
+  /// Closes the underlying Anthropic client.
   @override
   void endSession() {
-    _anthropicClient.endSession();
+    _anthropicClient.close();
     super.endSession();
   }
 
@@ -188,59 +196,45 @@ class AnthropicOpenAIClient extends OpenAIClient {
     final documentBase64 = base64Encode(documentBytes);
 
     // Build the message content with text and document
-    final contentBlocks = <anthropic.Block>[
-      anthropic.Block.text(text: userPrompt),
-      anthropic.Block.document(
-        type: 'document',
-        source: anthropic.DocumentBlockSource.base64PdfSource(
-          type: 'base64',
-          mediaType: anthropic.Base64PdfSourceMediaType.applicationPdf,
-          data: documentBase64,
-        ),
+    final contentBlocks = <anthropic.InputContentBlock>[
+      anthropic.InputContentBlock.text(userPrompt),
+      anthropic.InputContentBlock.document(
+        anthropic.DocumentSource.base64Pdf(documentBase64),
         title: documentFileName,
       ),
     ];
 
     // Create the tool for structured output
-    final outputTool = anthropic.Tool.custom(
-      name: outputToolName,
-      description: outputToolDescription,
-      inputSchema: outputSchema,
-    );
-
-    // Build the request
-    final request = anthropic.CreateMessageRequest(
-      model: anthropic.Model.modelId(model),
-      maxTokens: maxTokens,
-      system: systemPrompt != null ? anthropic.CreateMessageRequestSystem.text(systemPrompt) : null,
-      messages: [
-        anthropic.Message(
-          role: anthropic.MessageRole.user,
-          content: anthropic.MessageContent.blocks(contentBlocks),
-        ),
-      ],
-      tools: [outputTool],
-      toolChoice: anthropic.ToolChoice(
-        type: anthropic.ToolChoiceType.tool,
+    final outputTool = anthropic.ToolDefinition.custom(
+      anthropic.Tool(
         name: outputToolName,
+        description: outputToolDescription,
+        inputSchema: anthropic.InputSchema(
+          type: outputSchema['type'] as String? ?? 'object',
+          properties: outputSchema['properties'] as Map<String, dynamic>?,
+          required: (outputSchema['required'] as List?)?.cast<String>(),
+        ),
       ),
     );
 
-    // Call the API
-    final response = await _anthropicClient.createMessage(request: request);
-
-    // Extract the structured output from the tool call
-    final blocks = response.content.map(
-      blocks: (b) => b.value,
-      text: (_) => <anthropic.Block>[],
+    // Build the request
+    final request = anthropic.MessageCreateRequest(
+      model: model,
+      maxTokens: maxTokens,
+      system: systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null,
+      messages: [
+        anthropic.InputMessage.userBlocks(contentBlocks),
+      ],
+      tools: [outputTool],
+      toolChoice: anthropic.ToolChoice.tool(outputToolName),
     );
 
-    for (final block in blocks) {
-      final toolUse = block.mapOrNull(toolUse: (t) => t);
-      if (toolUse != null && toolUse.name == outputToolName) {
-        return toolUse.input;
-      }
-    }
+    // Call the API
+    final response = await _anthropicClient.messages.create(request);
+
+    // Extract the structured output from the tool call
+    final toolUse = response.toolUseBlocks.where((b) => b.name == outputToolName).firstOrNull;
+    if (toolUse != null) return toolUse.input;
 
     throw StateError(
       'No structured output found in response. '

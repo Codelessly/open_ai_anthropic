@@ -13,11 +13,11 @@ class ChatCompletionRequestConverter {
   ChatCompletionRequestConverter({
     MessageContentConverter? messageConverter,
     ToolMapper? toolMapper,
-  })  : _messageConverter = messageConverter ?? MessageContentConverter(),
-        _toolMapper = toolMapper ?? ToolMapper();
+  }) : _messageConverter = messageConverter ?? MessageContentConverter(),
+       _toolMapper = toolMapper ?? ToolMapper();
 
-  /// Converts an OpenAI CreateChatCompletionRequest to an Anthropic CreateMessageRequest.
-  anthropic.CreateMessageRequest convert(CreateChatCompletionRequest request) {
+  /// Converts an OpenAI CreateChatCompletionRequest to an Anthropic MessageCreateRequest.
+  anthropic.MessageCreateRequest convert(CreateChatCompletionRequest request) {
     // Log warnings for unsupported parameters
     _logUnsupportedParams(request);
 
@@ -45,32 +45,27 @@ class ChatCompletionRequestConverter {
       request.parallelToolCalls,
     );
 
-    return anthropic.CreateMessageRequest(
+    return anthropic.MessageCreateRequest(
       model: model,
       messages: messages,
       maxTokens: maxTokens,
-      system: systemPrompt != null
-          ? anthropic.CreateMessageRequestSystem.text(systemPrompt)
-          : null,
+      system: systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null,
       temperature: request.temperature,
       topP: request.topP,
       topK: request.topK,
       stopSequences: stopSequences,
       tools: tools,
       toolChoice: toolChoice,
-      stream: request.stream ?? false,
     );
   }
 
-  /// Converts the OpenAI model to Anthropic model.
-  anthropic.Model _convertModel(ChatCompletionModel model) {
+  /// Converts the OpenAI model to an Anthropic model ID string.
+  String _convertModel(ChatCompletionModel model) {
     // Pass through the model ID directly - users specify Claude model IDs
-    final modelId = model.map(
+    return model.map(
       model: (m) => _modelEnumToString(m.value),
       modelId: (m) => m.value,
     );
-
-    return anthropic.Model.modelId(modelId);
   }
 
   /// Converts ChatCompletionModels enum to string.

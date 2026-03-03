@@ -10,8 +10,7 @@ import '../../utils/logger.dart';
 class MessageContentConverter {
   final ToolMapper _toolMapper;
 
-  MessageContentConverter({ToolMapper? toolMapper})
-      : _toolMapper = toolMapper ?? ToolMapper();
+  MessageContentConverter({ToolMapper? toolMapper}) : _toolMapper = toolMapper ?? ToolMapper();
 
   /// Extracts the system prompt from OpenAI messages.
   ///
@@ -25,10 +24,8 @@ class MessageContentConverter {
         system: (msg) => systemMessages.add(msg.content),
         developer: (msg) {
           final content = msg.content.map(
-            parts: (parts) => parts.value
-                .map((part) => part.mapOrNull(text: (t) => t.text))
-                .whereType<String>()
-                .join('\n'),
+            parts: (parts) =>
+                parts.value.map((part) => part.mapOrNull(text: (t) => t.text)).whereType<String>().join('\n'),
             text: (text) => text.value,
           );
           systemMessages.add(content);
@@ -41,11 +38,13 @@ class MessageContentConverter {
     return systemMessages.join('\n\n');
   }
 
-  /// Converts OpenAI messages to Anthropic messages.
+  /// Converts OpenAI messages to Anthropic input messages.
   ///
   /// Filters out system/developer messages (handled separately as system prompt).
-  List<anthropic.Message> convertMessages(List<ChatCompletionMessage> messages) {
-    final result = <anthropic.Message>[];
+  List<anthropic.InputMessage> convertMessages(
+    List<ChatCompletionMessage> messages,
+  ) {
+    final result = <anthropic.InputMessage>[];
 
     // Group tool messages that follow an assistant message with tool calls
     final pendingToolResults = <String, String>{};
@@ -67,10 +66,12 @@ class MessageContentConverter {
             pendingToolResults.clear();
           }
 
-          result.add(anthropic.Message(
-            role: anthropic.MessageRole.user,
-            content: _convertUserContent(msg.content),
-          ));
+          result.add(
+            anthropic.InputMessage(
+              role: anthropic.MessageRole.user,
+              content: _convertUserContent(msg.content),
+            ),
+          );
         },
         assistant: (msg) {
           // If there are pending tool results, send them first
@@ -79,10 +80,12 @@ class MessageContentConverter {
             pendingToolResults.clear();
           }
 
-          result.add(anthropic.Message(
-            role: anthropic.MessageRole.assistant,
-            content: _convertAssistantContent(msg),
-          ));
+          result.add(
+            anthropic.InputMessage(
+              role: anthropic.MessageRole.assistant,
+              content: _convertAssistantContent(msg),
+            ),
+          );
         },
         tool: (msg) {
           // Collect tool results to send as a single user message
@@ -114,12 +117,14 @@ class MessageContentConverter {
   }
 
   /// Creates an Anthropic user message containing tool results.
-  anthropic.Message _createToolResultMessage(Map<String, String> results) {
+  anthropic.InputMessage _createToolResultMessage(
+    Map<String, String> results,
+  ) {
     final blocks = results.entries.map((entry) {
       return _toolMapper.toToolResultBlock(entry.key, entry.value);
     }).toList();
 
-    return anthropic.Message(
+    return anthropic.InputMessage(
       role: anthropic.MessageRole.user,
       content: anthropic.MessageContent.blocks(blocks),
     );
@@ -132,15 +137,17 @@ class MessageContentConverter {
     return content.map(
       string: (text) => anthropic.MessageContent.text(text.value),
       parts: (parts) => anthropic.MessageContent.blocks(
-        parts.value.map(_convertContentPart).whereType<anthropic.Block>().toList(),
+        parts.value.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList(),
       ),
     );
   }
 
-  /// Converts a single content part to Anthropic block.
-  anthropic.Block? _convertContentPart(ChatCompletionMessageContentPart part) {
+  /// Converts a single content part to an Anthropic input block.
+  anthropic.InputContentBlock? _convertContentPart(
+    ChatCompletionMessageContentPart part,
+  ) {
     return part.mapOrNull(
-      text: (textPart) => anthropic.Block.text(text: textPart.text),
+      text: (textPart) => anthropic.InputContentBlock.text(textPart.text),
       image: (imagePart) => _convertImagePart(imagePart),
       audio: (audioPart) {
         AnthropicOpenAILogger.warn(
@@ -150,13 +157,17 @@ class MessageContentConverter {
       },
       refusal: (refusalPart) {
         // Convert refusal to text for compatibility
-        return anthropic.Block.text(text: '[Refusal]: ${refusalPart.refusal}');
+        return anthropic.InputContentBlock.text(
+          '[Refusal]: ${refusalPart.refusal}',
+        );
       },
     );
   }
 
-  /// Converts an image content part to Anthropic image block.
-  anthropic.Block _convertImagePart(ChatCompletionMessageContentPartImage part) {
+  /// Converts an image content part to an Anthropic image block.
+  anthropic.InputContentBlock _convertImagePart(
+    ChatCompletionMessageContentPartImage part,
+  ) {
     final url = part.imageUrl.url;
 
     // Check if it's a data URL (base64)
@@ -165,16 +176,13 @@ class MessageContentConverter {
     }
 
     // It's a regular URL - use URL source
-    return anthropic.Block.image(
-      source: anthropic.ImageBlockSource.urlImageSource(
-        type: 'url',
-        url: url,
-      ),
+    return anthropic.InputContentBlock.image(
+      anthropic.ImageSource.url(url),
     );
   }
 
-  /// Converts a data URL to Anthropic base64 image block.
-  anthropic.Block _convertDataUrlImage(String dataUrl) {
+  /// Converts a data URL to an Anthropic base64 image block.
+  anthropic.InputContentBlock _convertDataUrlImage(String dataUrl) {
     // Parse data URL: data:[<mediatype>][;base64],<data>
     final regex = RegExp(r'data:([^;,]+)(?:;base64)?,(.+)');
     final match = regex.firstMatch(dataUrl);
@@ -188,18 +196,14 @@ class MessageContentConverter {
 
     // Map media types to Anthropic supported types
     final anthropicMediaType = switch (mediaType) {
-      'image/png' => anthropic.Base64ImageSourceMediaType.imagePng,
-      'image/gif' => anthropic.Base64ImageSourceMediaType.imageGif,
-      'image/webp' => anthropic.Base64ImageSourceMediaType.imageWebp,
-      _ => anthropic.Base64ImageSourceMediaType.imageJpeg, // Default to JPEG
+      'image/png' => anthropic.ImageMediaType.png,
+      'image/gif' => anthropic.ImageMediaType.gif,
+      'image/webp' => anthropic.ImageMediaType.webp,
+      _ => anthropic.ImageMediaType.jpeg, // Default to JPEG
     };
 
-    return anthropic.Block.image(
-      source: anthropic.ImageBlockSource.base64ImageSource(
-        type: 'base64',
-        mediaType: anthropicMediaType,
-        data: data,
-      ),
+    return anthropic.InputContentBlock.image(
+      anthropic.ImageSource.base64(data: data, mediaType: anthropicMediaType),
     );
   }
 
@@ -207,21 +211,23 @@ class MessageContentConverter {
   anthropic.MessageContent _convertAssistantContent(
     ChatCompletionAssistantMessage msg,
   ) {
-    final blocks = <anthropic.Block>[];
+    final blocks = <anthropic.InputContentBlock>[];
 
     // Add text content if present
     if (msg.content != null && msg.content!.isNotEmpty) {
-      blocks.add(anthropic.Block.text(text: msg.content!));
+      blocks.add(anthropic.InputContentBlock.text(msg.content!));
     }
 
     // Add tool calls as tool_use blocks
     if (msg.toolCalls != null) {
       for (final toolCall in msg.toolCalls!) {
-        blocks.add(anthropic.Block.toolUse(
-          id: toolCall.id,
-          name: toolCall.function.name,
-          input: _parseToolArguments(toolCall.function.arguments),
-        ));
+        blocks.add(
+          anthropic.InputContentBlock.toolUse(
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: _parseToolArguments(toolCall.function.arguments),
+          ),
+        );
       }
     }
 
@@ -231,9 +237,9 @@ class MessageContentConverter {
     }
 
     // If only one text block, return as text
-    if (blocks.length == 1 && blocks.first is anthropic.TextBlock) {
+    if (blocks.length == 1 && blocks.first is anthropic.TextInputBlock) {
       return anthropic.MessageContent.text(
-        (blocks.first as anthropic.TextBlock).text,
+        (blocks.first as anthropic.TextInputBlock).text,
       );
     }
 

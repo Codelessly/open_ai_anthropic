@@ -12,6 +12,8 @@ class StopReasonMapper {
   /// - toolUse → toolCalls
   /// - pauseTurn → stop (no direct equivalent)
   /// - refusal → contentFilter (closest equivalent)
+  /// - compaction → stop (no direct equivalent)
+  /// - modelContextWindowExceeded → length (closest equivalent)
   ChatCompletionFinishReason? toOpenAI(anthropic.StopReason? reason) {
     if (reason == null) return null;
 
@@ -22,6 +24,8 @@ class StopReasonMapper {
       anthropic.StopReason.toolUse => ChatCompletionFinishReason.toolCalls,
       anthropic.StopReason.pauseTurn => ChatCompletionFinishReason.stop,
       anthropic.StopReason.refusal => ChatCompletionFinishReason.contentFilter,
+      anthropic.StopReason.compaction => ChatCompletionFinishReason.stop,
+      anthropic.StopReason.modelContextWindowExceeded => ChatCompletionFinishReason.length,
     };
   }
 }

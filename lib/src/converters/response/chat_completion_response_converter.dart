@@ -18,8 +18,9 @@ class ChatCompletionResponseConverter {
     anthropic.Message anthropicMessage,
     String requestModel,
   ) {
-    final textContent = _extractTextContent(anthropicMessage.content);
-    final toolCalls = _extractToolCalls(anthropicMessage.content);
+    final textParts = anthropicMessage.textBlocks.map((b) => b.text).toList();
+    final textContent = textParts.isEmpty ? null : textParts.join('\n');
+    final toolCalls = _extractToolCalls(anthropicMessage);
 
     final assistantMessage = ChatCompletionMessage.assistant(
       content: textContent,
@@ -34,71 +35,40 @@ class ChatCompletionResponseConverter {
     );
 
     return CreateChatCompletionResponse(
-      id: anthropicMessage.id ?? _generateId(),
+      id: anthropicMessage.id,
       choices: [choice],
       created: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      model: anthropicMessage.model ?? requestModel,
+      model: anthropicMessage.model,
       object: 'chat.completion',
       usage: _convertUsage(anthropicMessage.usage),
       provider: 'anthropic',
     );
   }
 
-  /// Extracts text content from Anthropic message content.
-  String? _extractTextContent(anthropic.MessageContent content) {
-    return content.map(
-      text: (text) => text.value.isEmpty ? null : text.value,
-      blocks: (blocks) {
-        final textParts = blocks.value
-            .map((block) => block.mapOrNull(
-                  text: (textBlock) => textBlock.text,
-                ))
-            .whereType<String>()
-            .toList();
+  /// Extracts tool calls from Anthropic response content blocks.
+  List<ChatCompletionMessageToolCall>? _extractToolCalls(anthropic.Message message) {
+    final toolCalls = message.toolUseBlocks
+        .map(
+          (toolUse) => ChatCompletionMessageToolCall(
+            id: toolUse.id,
+            type: ChatCompletionMessageToolCallType.function,
+            function: ChatCompletionMessageFunctionCall(
+              name: toolUse.name,
+              arguments: jsonEncode(toolUse.input),
+            ),
+          ),
+        )
+        .toList();
 
-        return textParts.isEmpty ? null : textParts.join('\n');
-      },
-    );
-  }
-
-  /// Extracts tool calls from Anthropic message content.
-  List<ChatCompletionMessageToolCall>? _extractToolCalls(
-    anthropic.MessageContent content,
-  ) {
-    return content.mapOrNull(
-      blocks: (blocks) {
-        final toolCalls = blocks.value
-            .map((block) => block.mapOrNull(
-                  toolUse: (toolUse) => ChatCompletionMessageToolCall(
-                    id: toolUse.id,
-                    type: ChatCompletionMessageToolCallType.function,
-                    function: ChatCompletionMessageFunctionCall(
-                      name: toolUse.name,
-                      arguments: jsonEncode(toolUse.input),
-                    ),
-                  ),
-                ))
-            .whereType<ChatCompletionMessageToolCall>()
-            .toList();
-
-        return toolCalls.isEmpty ? null : toolCalls;
-      },
-    );
+    return toolCalls.isEmpty ? null : toolCalls;
   }
 
   /// Converts Anthropic usage to OpenAI completion usage.
-  CompletionUsage? _convertUsage(anthropic.Usage? usage) {
-    if (usage == null) return null;
-
+  CompletionUsage _convertUsage(anthropic.Usage usage) {
     return CompletionUsage(
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,
       totalTokens: usage.inputTokens + usage.outputTokens,
     );
-  }
-
-  /// Generates a unique ID for the response.
-  String _generateId() {
-    return 'chatcmpl-${DateTime.now().millisecondsSinceEpoch}';
   }
 }

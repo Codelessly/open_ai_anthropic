@@ -42,16 +42,6 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
   static const String anthropicBeta =
       'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14';
 
-  late final _authenticatedClient = InterceptedClient.build(
-    interceptors: [
-      _AnthropicAuthInterceptor(tokenStore: _tokenStore),
-      if (debugLogNetworkRequests) LoggerInterceptor(),
-    ],
-  );
-
-  @override
-  http.Client get client => _authenticatedClient;
-
   final Future<http.BaseRequest> Function(http.BaseRequest request)? onRequestCallback;
 
   /// Creates a new ClaudeCodeOpenAIClient.
@@ -77,7 +67,6 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     queryParams: queryParams,
     retries: anthropicRetries,
     debugLogNetworkRequests: debugLogNetworkRequests,
-    client: client,
   );
 
   @override
@@ -86,32 +75,36 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
 }
 
 class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
-  final ClaudeCodeTokenStore tokenStore;
-  final bool debugLogNetworkRequests;
-
-  late final http.Client _authenticatedClient = InterceptedClient.build(
+  static http.Client _buildAuthenticatedClient(
+    ClaudeCodeTokenStore tokenStore,
+    bool debug,
+  ) => InterceptedClient.build(
     interceptors: [
       _AnthropicAuthInterceptor(tokenStore: tokenStore),
-      if (debugLogNetworkRequests) LoggerInterceptor(),
+      if (debug) LoggerInterceptor(),
     ],
   );
 
-  @override
-  http.Client get client => _authenticatedClient;
-
   AnthropicAuthenticatedClient({
-    super.baseUrl,
-    super.headers,
-    super.queryParams,
-    super.retries,
-    required this.tokenStore,
-    super.client,
-    this.debugLogNetworkRequests = false,
-  }) : super(apiKey: ''); // API key not used, OAuth handled in interceptor.
-
-  @override
-  Future<BaseRequest> onRequest(BaseRequest request) async =>
-      request.copyWith(headers: await _injectHeaders(tokenStore, request.headers));
+    String? baseUrl,
+    Map<String, String>? headers,
+    Map<String, dynamic>? queryParams,
+    int retries = 3,
+    required ClaudeCodeTokenStore tokenStore,
+    bool debugLogNetworkRequests = false,
+  }) : super(
+         config: anthropic.AnthropicConfig(
+           // OAuth handles auth — no API key header should be added.
+           authProvider: const anthropic.NoAuthProvider(),
+           baseUrl: AnthropicOpenAIClient.normalizeAnthropicBaseUrl(baseUrl),
+           defaultHeaders: {
+             ...?headers,
+           },
+           defaultQueryParams: queryParams?.map((k, v) => MapEntry(k, '$v')) ?? const {},
+           retryPolicy: anthropic.RetryPolicy(maxRetries: retries),
+         ),
+         httpClient: _buildAuthenticatedClient(tokenStore, debugLogNetworkRequests),
+       );
 
   /// Injects the necessary authentication headers into the request.
   static Future<Map<String, String>> _injectHeaders(
@@ -123,8 +116,6 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
         'Authorization': 'Bearer ${await tokenStore.getAccessToken()}',
         'anthropic-beta': ClaudeCodeOpenAIClient.anthropicBeta,
       }
-      // Remove 'accept' header if present, as it may interfere with some endpoints.
-      ..remove('accept')
       // Critical: ensure 'x-api-key' is not sent, as it will cause authentication to fail.
       // We use OAuth tokens instead of API keys for authentication.
       ..remove('x-api-key');
@@ -138,7 +129,12 @@ class _AnthropicAuthInterceptor implements InterceptorContract {
 
   @override
   FutureOr<BaseRequest> interceptRequest({required BaseRequest request}) async {
-    return request.copyWith(headers: await AnthropicAuthenticatedClient._injectHeaders(tokenStore, request.headers));
+    return request.copyWith(
+      headers: await AnthropicAuthenticatedClient._injectHeaders(
+        tokenStore,
+        request.headers,
+      ),
+    );
   }
 
   @override

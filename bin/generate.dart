@@ -69,14 +69,14 @@ Future<HttpServer> startRedirectionServer(
   server.listen((request) async {
     final path = request.uri.path;
 
-    if(path.isEmpty || path == '/') {
+    if (path.isEmpty || path == '/') {
       // Just respond with a simple page for root requests
       request.response
         ..statusCode = 200
         ..headers.contentType = ContentType.html
         ..write(
           '''
-          <html>
+          <html lang="en">
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
               <h1>OAuth Redirection Server</h1>
               <p>This server is used to capture the authorization code from the OAuth flow.</p>
@@ -100,7 +100,7 @@ Future<HttpServer> startRedirectionServer(
           ..headers.contentType = ContentType.html
           ..write(
             '''
-            <html>
+            <html lang="en">
               <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
                 <h1>Authorization Failed</h1>
                 <p>Missing code or state in the callback.</p>
@@ -122,7 +122,7 @@ Future<HttpServer> startRedirectionServer(
         ..headers.contentType = ContentType.html
         ..write(
           '''
-          <html>
+          <html lang="en">
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
               <h1>Authorization Successful!</h1>
               <p>You can now close this window.</p>

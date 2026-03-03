@@ -5,24 +5,38 @@ import 'package:openai_dart/openai_dart.dart';
 
 /// Maps tools and tool calls between OpenAI and Anthropic formats.
 class ToolMapper {
-  /// Ensures the input schema has the required 'type' field for the
-  /// Anthropic API, which rejects custom tools without `input_schema.type`.
-  static Map<String, dynamic> _ensureValidSchema(Map<String, dynamic>? schema) {
-    if (schema == null || schema.isEmpty) return {'type': 'object'};
-    if (!schema.containsKey('type')) return {'type': 'object', ...schema};
-    return schema;
+  /// Builds an [anthropic.InputSchema] from a raw JSON schema map.
+  static anthropic.InputSchema _buildInputSchema(Map<String, dynamic>? schema) {
+    if (schema == null || schema.isEmpty) {
+      return const anthropic.InputSchema(type: 'object');
+    }
+    final rawProperties = schema['properties'];
+    final properties = rawProperties is Map<String, dynamic>
+        ? rawProperties
+        : rawProperties is Map
+            ? Map<String, dynamic>.from(rawProperties)
+            : null;
+    return anthropic.InputSchema(
+      type: schema['type'] as String? ?? 'object',
+      properties: properties,
+      required: (schema['required'] as List?)?.cast<String>(),
+    );
   }
 
-  /// Converts OpenAI tools to Anthropic tools.
-  List<anthropic.Tool>? toAnthropic(List<ChatCompletionTool>? tools) {
+  /// Converts OpenAI tools to Anthropic tool definitions.
+  List<anthropic.ToolDefinition>? toAnthropic(
+    List<ChatCompletionTool>? tools,
+  ) {
     if (tools == null || tools.isEmpty) return null;
 
     return tools.map((tool) {
       final function = tool.function;
-      return anthropic.Tool.custom(
-        name: function.name,
-        description: function.description,
-        inputSchema: _ensureValidSchema(function.parameters),
+      return anthropic.ToolDefinition.custom(
+        anthropic.Tool(
+          name: function.name,
+          description: function.description,
+          inputSchema: _buildInputSchema(function.parameters),
+        ),
       );
     }).toList();
   }
@@ -34,59 +48,51 @@ class ToolMapper {
   ) {
     if (toolChoice == null) return null;
 
+    final disableParallel = parallelToolCalls == null ? null : !parallelToolCalls;
+
     return toolChoice.map(
       mode: (mode) => switch (mode.value) {
-        ChatCompletionToolChoiceMode.auto => anthropic.ToolChoice(
-            type: anthropic.ToolChoiceType.auto,
-            disableParallelToolUse:
-                parallelToolCalls == null ? null : !parallelToolCalls,
-          ),
-        ChatCompletionToolChoiceMode.required => anthropic.ToolChoice(
-            type: anthropic.ToolChoiceType.any,
-            disableParallelToolUse:
-                parallelToolCalls == null ? null : !parallelToolCalls,
-          ),
+        ChatCompletionToolChoiceMode.auto => anthropic.ToolChoice.auto(disableParallelToolUse: disableParallel),
+        ChatCompletionToolChoiceMode.required => anthropic.ToolChoice.any(disableParallelToolUse: disableParallel),
         ChatCompletionToolChoiceMode.none => null,
       },
-      tool: (named) => anthropic.ToolChoice(
-        type: anthropic.ToolChoiceType.tool,
-        name: named.value.function.name,
-        disableParallelToolUse:
-            parallelToolCalls == null ? null : !parallelToolCalls,
+      tool: (named) => anthropic.ToolChoice.tool(
+        named.value.function.name,
+        disableParallelToolUse: disableParallel,
       ),
     );
   }
 
-  /// Extracts tool calls from Anthropic blocks and converts to OpenAI format.
+  /// Extracts tool calls from Anthropic response content blocks.
   List<ChatCompletionMessageToolCall>? extractToolCalls(
-    List<anthropic.Block> blocks,
+    List<anthropic.ContentBlock> blocks,
   ) {
     final toolCalls = blocks
-        .map((block) => block.mapOrNull(
-              toolUse: (toolUse) => ChatCompletionMessageToolCall(
-                id: toolUse.id,
-                type: ChatCompletionMessageToolCallType.function,
-                function: ChatCompletionMessageFunctionCall(
-                  name: toolUse.name,
-                  arguments: jsonEncode(toolUse.input),
-                ),
-              ),
-            ))
-        .whereType<ChatCompletionMessageToolCall>()
+        .whereType<anthropic.ToolUseBlock>()
+        .map(
+          (toolUse) => ChatCompletionMessageToolCall(
+            id: toolUse.id,
+            type: ChatCompletionMessageToolCallType.function,
+            function: ChatCompletionMessageFunctionCall(
+              name: toolUse.name,
+              arguments: jsonEncode(toolUse.input),
+            ),
+          ),
+        )
         .toList();
 
     return toolCalls.isEmpty ? null : toolCalls;
   }
 
-  /// Converts OpenAI tool message to Anthropic tool result block.
-  anthropic.Block toToolResultBlock(
+  /// Converts an OpenAI tool message to an Anthropic tool result block.
+  anthropic.InputContentBlock toToolResultBlock(
     String toolCallId,
     String? content, {
     bool? isError,
   }) {
-    return anthropic.Block.toolResult(
+    return anthropic.InputContentBlock.toolResult(
       toolUseId: toolCallId,
-      content: anthropic.ToolResultBlockContent.text(content ?? ''),
+      content: [anthropic.ToolResultContent.text(content ?? '')],
       isError: isError,
     );
   }
