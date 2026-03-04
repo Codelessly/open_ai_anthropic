@@ -22,8 +22,8 @@ class ChatCompletionRequestConverter {
   }) : _messageConverter = messageConverter ?? MessageContentConverter(),
        _toolMapper = toolMapper ?? ToolMapper();
 
-  /// Converts an OpenAI CreateChatCompletionRequest to an Anthropic MessageCreateRequest.
-  anthropic.MessageCreateRequest convert(CreateChatCompletionRequest request) {
+  /// Converts an OpenAI ChatCompletionCreateRequest to an Anthropic MessageCreateRequest.
+  anthropic.MessageCreateRequest convert(ChatCompletionCreateRequest request) {
     // Log warnings for unsupported parameters
     _logUnsupportedParams(request);
 
@@ -33,8 +33,8 @@ class ChatCompletionRequestConverter {
     // Convert messages to Anthropic format
     final messages = _messageConverter.convertMessages(request.messages);
 
-    // Convert model
-    final model = _convertModel(request.model);
+    // Model is now a plain string
+    final model = request.model;
 
     // Convert max tokens (required in Anthropic, optional in OpenAI)
     final maxTokens = request.maxCompletionTokens ?? request.maxTokens ?? 4096;
@@ -55,14 +55,14 @@ class ChatCompletionRequestConverter {
     // Anthropic doesn't have a native responseFormat; instead we create a
     // tool with the schema and force the model to call it.
     final responseFormat = request.responseFormat;
-    if (responseFormat is ResponseFormatJsonSchema) {
+    if (responseFormat is JsonSchemaResponseFormat) {
       if (toolChoice != null) {
         AnthropicOpenAILogger.warn(
           'responseFormat jsonSchema overrides explicit toolChoice. '
           'The model will be forced to call the structured output tool.',
         );
       }
-      final schema = responseFormat.jsonSchema.schema;
+      final schema = responseFormat.schema;
       final jsonTool = anthropic.ToolDefinition.custom(
         anthropic.Tool(
           name: jsonSchemaToolName,
@@ -88,41 +88,17 @@ class ChatCompletionRequestConverter {
     );
   }
 
-  /// Converts the OpenAI model to an Anthropic model ID string.
-  String _convertModel(ChatCompletionModel model) {
-    // Pass through the model ID directly - users specify Claude model IDs
-    return model.map(
-      model: (m) => _modelEnumToString(m.value),
-      modelId: (m) => m.value,
-    );
-  }
-
-  /// Converts ChatCompletionModels enum to string.
-  String _modelEnumToString(ChatCompletionModels model) {
-    // The enum values don't directly correspond to Claude models
-    // so we pass through the string value
-    return switch (model) {
-      ChatCompletionModels.gpt4o => 'claude-sonnet-4-20250514',
-      ChatCompletionModels.gpt4oMini => 'claude-haiku-4-5-20251001',
-      ChatCompletionModels.gpt4 => 'claude-3-opus-20240229',
-      ChatCompletionModels.gpt4Turbo => 'claude-sonnet-4-20250514',
-      ChatCompletionModels.gpt35Turbo => 'claude-3-5-haiku-20241022',
-      _ => 'claude-sonnet-4-20250514', // Default fallback
-    };
-  }
-
   /// Converts OpenAI stop sequences to Anthropic format.
-  List<String>? _convertStopSequences(ChatCompletionStop? stop) {
+  List<String>? _convertStopSequences(Object? stop) {
     if (stop == null) return null;
 
-    return stop.map(
-      listString: (list) => list.value,
-      string: (s) => s.value != null ? [s.value!] : null,
-    );
+    if (stop is String) return [stop];
+    if (stop is List) return stop.cast<String>();
+    return null;
   }
 
   /// Logs warnings for unsupported parameters.
-  void _logUnsupportedParams(CreateChatCompletionRequest request) {
+  void _logUnsupportedParams(ChatCompletionCreateRequest request) {
     AnthropicOpenAILogger.logUnsupportedParam(
       'frequency_penalty',
       request.frequencyPenalty,
@@ -149,8 +125,7 @@ class ChatCompletionRequestConverter {
     );
     // Only log response_format as unsupported when it's NOT jsonSchema
     // (jsonSchema is handled via tool-based structured output).
-    if (request.responseFormat != null &&
-        request.responseFormat is! ResponseFormatJsonSchema) {
+    if (request.responseFormat != null && request.responseFormat is! JsonSchemaResponseFormat) {
       AnthropicOpenAILogger.logUnsupportedParam(
         'response_format',
         request.responseFormat,
@@ -185,18 +160,6 @@ class ChatCompletionRequestConverter {
     if (request.n != null && request.n! > 1) {
       AnthropicOpenAILogger.warn(
         'Parameter "n" > 1 is not supported by Anthropic. Only 1 choice will be returned.',
-      );
-    }
-
-    // Deprecated parameters
-    if (request.functions != null) {
-      AnthropicOpenAILogger.warn(
-        'Parameter "functions" is deprecated. Use "tools" instead.',
-      );
-    }
-    if (request.functionCall != null) {
-      AnthropicOpenAILogger.warn(
-        'Parameter "function_call" is deprecated. Use "tool_choice" instead.',
       );
     }
   }

@@ -4,15 +4,13 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
-import '../request/chat_completion_request_converter.dart'
-    show jsonSchemaToolName;
+import '../request/chat_completion_request_converter.dart' show jsonSchemaToolName;
 
-/// Transforms Anthropic MessageStreamEvents to OpenAI CreateChatCompletionStreamResponse.
+/// Transforms Anthropic MessageStreamEvents to OpenAI ChatStreamEvents.
 ///
 /// This transformer maintains state across the stream to properly map
 /// Anthropic's block-based streaming to OpenAI's delta-based streaming.
-class StreamEventTransformer
-    extends StreamTransformerBase<anthropic.MessageStreamEvent, CreateChatCompletionStreamResponse> {
+class StreamEventTransformer extends StreamTransformerBase<anthropic.MessageStreamEvent, ChatStreamEvent> {
   final String _requestModel;
   final StopReasonMapper _stopReasonMapper;
 
@@ -23,9 +21,7 @@ class StreamEventTransformer
        _stopReasonMapper = stopReasonMapper ?? StopReasonMapper();
 
   @override
-  Stream<CreateChatCompletionStreamResponse> bind(
-    Stream<anthropic.MessageStreamEvent> stream,
-  ) {
+  Stream<ChatStreamEvent> bind(Stream<anthropic.MessageStreamEvent> stream) {
     return _TransformingStream(
       source: stream,
       requestModel: _requestModel,
@@ -34,7 +30,7 @@ class StreamEventTransformer
   }
 }
 
-class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
+class _TransformingStream extends Stream<ChatStreamEvent> {
   final Stream<anthropic.MessageStreamEvent> source;
   final String requestModel;
   final StopReasonMapper stopReasonMapper;
@@ -46,14 +42,14 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
   });
 
   @override
-  StreamSubscription<CreateChatCompletionStreamResponse> listen(
-    void Function(CreateChatCompletionStreamResponse event)? onData, {
+  StreamSubscription<ChatStreamEvent> listen(
+    void Function(ChatStreamEvent event)? onData, {
     Function? onError,
     void Function()? onDone,
     bool? cancelOnError,
   }) {
     final state = _StreamState(requestModel: requestModel);
-    final controller = StreamController<CreateChatCompletionStreamResponse>();
+    final controller = StreamController<ChatStreamEvent>();
 
     final subscription = source.listen(
       (event) {
@@ -81,7 +77,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     );
   }
 
-  List<CreateChatCompletionStreamResponse> _transformEvent(
+  List<ChatStreamEvent> _transformEvent(
     anthropic.MessageStreamEvent event,
     _StreamState state,
   ) {
@@ -97,7 +93,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     };
   }
 
-  List<CreateChatCompletionStreamResponse> _handleMessageStart(
+  List<ChatStreamEvent> _handleMessageStart(
     anthropic.MessageStartEvent event,
     _StreamState state,
   ) {
@@ -109,25 +105,23 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     return [
       _createResponse(
         state: state,
-        delta: const ChatCompletionStreamResponseDelta(
-          role: ChatCompletionMessageRole.assistant,
-        ),
+        delta: const ChatDelta(role: 'assistant'),
       ),
     ];
   }
 
-  List<CreateChatCompletionStreamResponse> _handleMessageDelta(
+  List<ChatStreamEvent> _handleMessageDelta(
     anthropic.MessageDeltaEvent event,
     _StreamState state,
   ) {
     // When JSON schema tool was used, the stop reason is "tool_use" but from
     // the caller's perspective this is a normal text response → map to "stop".
     final finishReason = state.jsonSchemaBlockIndices.isNotEmpty
-        ? ChatCompletionFinishReason.stop
+        ? FinishReason.stop
         : stopReasonMapper.toOpenAI(event.delta.stopReason);
 
     final outputTokens = event.usage.outputTokens;
-    final usage = CompletionUsage(
+    final usage = Usage(
       promptTokens: 0, // Not available in delta
       completionTokens: outputTokens,
       totalTokens: outputTokens,
@@ -142,7 +136,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     ];
   }
 
-  List<CreateChatCompletionStreamResponse> _handleMessageStop(
+  List<ChatStreamEvent> _handleMessageStop(
     anthropic.MessageStopEvent event,
     _StreamState state,
   ) {
@@ -150,7 +144,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     return [];
   }
 
-  List<CreateChatCompletionStreamResponse> _handleContentBlockStart(
+  List<ChatStreamEvent> _handleContentBlockStart(
     anthropic.ContentBlockStartEvent event,
     _StreamState state,
   ) {
@@ -163,7 +157,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
         // output as text content deltas instead of tool call chunks.
         if (name == jsonSchemaToolName) {
           state.jsonSchemaBlockIndices.add(event.index);
-          return <CreateChatCompletionStreamResponse>[];
+          return <ChatStreamEvent>[];
         }
 
         final toolCallIndex = state.toolCallCount++;
@@ -172,13 +166,13 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
         return [
           _createResponse(
             state: state,
-            delta: ChatCompletionStreamResponseDelta(
+            delta: ChatDelta(
               toolCalls: [
-                ChatCompletionStreamMessageToolCallChunk(
+                ToolCallDelta(
                   index: toolCallIndex,
                   id: id,
-                  type: ChatCompletionStreamMessageToolCallChunkType.function,
-                  function: ChatCompletionStreamMessageFunctionCall(
+                  type: 'function',
+                  function: FunctionCallDelta(
                     name: name,
                     arguments: '',
                   ),
@@ -196,13 +190,13 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
         return [
           _createResponse(
             state: state,
-            delta: ChatCompletionStreamResponseDelta(
+            delta: ChatDelta(
               toolCalls: [
-                ChatCompletionStreamMessageToolCallChunk(
+                ToolCallDelta(
                   index: toolCallIndex,
                   id: id,
-                  type: ChatCompletionStreamMessageToolCallChunkType.function,
-                  function: ChatCompletionStreamMessageFunctionCall(
+                  type: 'function',
+                  function: FunctionCallDelta(
                     name: name,
                     arguments: '',
                   ),
@@ -217,7 +211,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     };
   }
 
-  List<CreateChatCompletionStreamResponse> _handleContentBlockDelta(
+  List<ChatStreamEvent> _handleContentBlockDelta(
     anthropic.ContentBlockDeltaEvent event,
     _StreamState state,
   ) {
@@ -225,7 +219,7 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
       anthropic.TextDelta(:final text) => [
         _createResponse(
           state: state,
-          delta: ChatCompletionStreamResponseDelta(content: text),
+          delta: ChatDelta(content: text),
         ),
       ],
       anthropic.InputJsonDelta(:final partialJson) => () {
@@ -235,24 +229,24 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
           return [
             _createResponse(
               state: state,
-              delta: ChatCompletionStreamResponseDelta(content: partialJson),
+              delta: ChatDelta(content: partialJson),
             ),
           ];
         }
 
         final toolCallIndex = _getToolCallIndex(state, event.index);
         if (toolCallIndex == null) {
-          return <CreateChatCompletionStreamResponse>[];
+          return <ChatStreamEvent>[];
         }
 
         return [
           _createResponse(
             state: state,
-            delta: ChatCompletionStreamResponseDelta(
+            delta: ChatDelta(
               toolCalls: [
-                ChatCompletionStreamMessageToolCallChunk(
+                ToolCallDelta(
                   index: toolCallIndex,
-                  function: ChatCompletionStreamMessageFunctionCall(
+                  function: FunctionCallDelta(
                     arguments: partialJson,
                   ),
                 ),
@@ -264,19 +258,17 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
       anthropic.ThinkingDelta(:final thinking) => [
         _createResponse(
           state: state,
-          delta: ChatCompletionStreamResponseDelta(
+          delta: ChatDelta(
             reasoningContent: thinking,
           ),
         ),
       ],
       // Signature, citations, and compaction deltas have no OpenAI equivalent
-      anthropic.SignatureDelta() ||
-      anthropic.CitationsDelta() ||
-      anthropic.CompactionDelta() => <CreateChatCompletionStreamResponse>[],
+      anthropic.SignatureDelta() || anthropic.CitationsDelta() || anthropic.CompactionDelta() => <ChatStreamEvent>[],
     };
   }
 
-  List<CreateChatCompletionStreamResponse> _handleContentBlockStop(
+  List<ChatStreamEvent> _handleContentBlockStop(
     anthropic.ContentBlockStopEvent event,
     _StreamState state,
   ) {
@@ -290,18 +282,18 @@ class _TransformingStream extends Stream<CreateChatCompletionStreamResponse> {
     return state.blockToolCallIndex[blockIndex];
   }
 
-  CreateChatCompletionStreamResponse _createResponse({
+  ChatStreamEvent _createResponse({
     required _StreamState state,
-    ChatCompletionStreamResponseDelta? delta,
-    ChatCompletionFinishReason? finishReason,
-    CompletionUsage? usage,
+    ChatDelta? delta,
+    FinishReason? finishReason,
+    Usage? usage,
   }) {
-    return CreateChatCompletionStreamResponse(
+    return ChatStreamEvent(
       id: state.messageId,
       choices: [
-        ChatCompletionStreamResponseChoice(
+        ChatStreamChoice(
           index: 0,
-          delta: delta,
+          delta: delta ?? const ChatDelta(),
           finishReason: finishReason,
         ),
       ],

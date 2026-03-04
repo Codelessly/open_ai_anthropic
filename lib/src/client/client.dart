@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
+import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
 import 'package:openai_dart/openai_dart.dart';
+// ignore: implementation_imports, depend_on_referenced_packages
+import 'package:openai_dart/src/client/request_builder.dart';
 
 import '../converters/request/chat_completion_request_converter.dart';
 import '../converters/response/chat_completion_response_converter.dart';
@@ -19,14 +22,10 @@ import '../converters/streaming/stream_event_transformer.dart';
 /// ```dart
 /// final client = AnthropicOpenAIClient(apiKey: 'your-anthropic-api-key');
 ///
-/// final response = await client.createChatCompletion(
-///   request: CreateChatCompletionRequest(
-///     model: ChatCompletionModel.modelId('claude-sonnet-4-20250514'),
-///     messages: [
-///       ChatCompletionMessage.user(
-///         content: ChatCompletionUserMessageContent.string('Hello!'),
-///       ),
-///     ],
+/// final response = await client.chat.completions.create(
+///   ChatCompletionCreateRequest(
+///     model: 'claude-sonnet-4-20250514',
+///     messages: [ChatMessage.user('Hello!')],
 ///   ),
 /// );
 /// ```
@@ -34,10 +33,28 @@ class AnthropicOpenAIClient extends OpenAIClient {
   late final anthropic.AnthropicClient _anthropicClient;
   final ChatCompletionRequestConverter _requestConverter;
   final ChatCompletionResponseConverter _responseConverter;
+  final http.Client? _ownHttpClient;
 
-  final int _anthropicRetries;
+  final String _apiKey;
+  final String _baseUrl;
+  final Map<String, String> _headers;
+  final Map<String, dynamic> _queryParams;
+  final int _retries;
 
-  int get anthropicRetries => _anthropicRetries;
+  /// The Anthropic API key.
+  String get apiKey => _apiKey;
+
+  /// The base URL for the Anthropic API.
+  String get baseUrl => _baseUrl;
+
+  /// Additional headers to send with every request.
+  Map<String, String> get headers => _headers;
+
+  /// Query parameters to send with every request.
+  Map<String, dynamic> get queryParams => _queryParams;
+
+  /// Number of retries for failed requests.
+  int get anthropicRetries => _retries;
 
   /// Creates a new AnthropicOpenAIClient.
   ///
@@ -49,15 +66,21 @@ class AnthropicOpenAIClient extends OpenAIClient {
   /// - [retries]: Number of retries for failed requests (default: 3).
   /// - [client]: Optional custom HTTP client.
   AnthropicOpenAIClient({
-    super.apiKey,
-    super.baseUrl = 'https://api.anthropic.com/v1',
-    super.headers,
-    super.queryParams,
-    super.retries,
-    super.client,
-  }) : _anthropicRetries = retries,
+    String apiKey = '',
+    String baseUrl = 'https://api.anthropic.com/v1',
+    Map<String, String> headers = const {},
+    Map<String, dynamic> queryParams = const {},
+    int retries = 3,
+    http.Client? client,
+  }) : _apiKey = apiKey,
+       _baseUrl = baseUrl,
+       _headers = headers,
+       _queryParams = queryParams,
+       _retries = retries,
+       _ownHttpClient = client,
        _requestConverter = ChatCompletionRequestConverter(),
-       _responseConverter = ChatCompletionResponseConverter() {
+       _responseConverter = ChatCompletionResponseConverter(),
+       super(httpClient: client) {
     _anthropicClient = buildAnthropicClient();
   }
 
@@ -72,81 +95,34 @@ class AnthropicOpenAIClient extends OpenAIClient {
   anthropic.AnthropicClient buildAnthropicClient() {
     return anthropic.AnthropicClient(
       config: anthropic.AnthropicConfig(
-        authProvider: apiKey.isNotEmpty ? anthropic.ApiKeyProvider(apiKey) : null,
-        baseUrl: normalizeAnthropicBaseUrl(baseUrl),
-        defaultHeaders: headers,
-        defaultQueryParams: queryParams.map((k, v) => MapEntry(k, '$v')),
-        retryPolicy: anthropic.RetryPolicy(maxRetries: _anthropicRetries),
+        authProvider: _apiKey.isNotEmpty ? anthropic.ApiKeyProvider(_apiKey) : null,
+        baseUrl: normalizeAnthropicBaseUrl(_baseUrl),
+        defaultHeaders: _headers,
+        defaultQueryParams: _queryParams.map((k, v) => MapEntry(k, '$v')),
+        retryPolicy: anthropic.RetryPolicy(maxRetries: _retries),
       ),
-      httpClient: client,
+      httpClient: _ownHttpClient,
     );
   }
 
-  /// Creates a chat completion.
-  ///
-  /// This method converts the OpenAI request format to Anthropic format,
-  /// calls the Anthropic API, and converts the response back to OpenAI format.
-  ///
-  /// Note: Some OpenAI parameters are not supported by Anthropic and will be
-  /// logged as warnings. The response will include `provider: 'anthropic'` to
-  /// indicate which provider processed the request.
+  // ============================================================================
+  // Override chat resource to route through Anthropic
+  // ============================================================================
+
+  _AnthropicChatResource? _anthropicChat;
+
   @override
-  Future<CreateChatCompletionResponse> createChatCompletion({required CreateChatCompletionRequest request}) async {
-    // Get the model ID for the response
-    final requestModel = request.model.map(model: (m) => m.value.toString(), modelId: (m) => m.value);
-
-    // Convert OpenAI request to Anthropic request
-    final anthropicRequest = _requestConverter.convert(request);
-
-    // Call Anthropic API
-    final anthropicResponse = await _anthropicClient.messages.create(anthropicRequest);
-
-    // Convert Anthropic response to OpenAI response
-    return _responseConverter.convert(anthropicResponse, requestModel);
-  }
-
-  /// Creates a streaming chat completion.
-  ///
-  /// This method converts the OpenAI request format to Anthropic format,
-  /// streams responses from the Anthropic API, and transforms each event
-  /// to OpenAI's streaming format.
-  ///
-  /// Example:
-  /// ```dart
-  /// final stream = client.createChatCompletionStream(
-  ///   request: CreateChatCompletionRequest(
-  ///     model: ChatCompletionModel.modelId('claude-sonnet-4-20250514'),
-  ///     messages: [...],
-  ///   ),
-  /// );
-  ///
-  /// await for (final chunk in stream) {
-  ///   print(chunk.choices.first.delta?.content ?? '');
-  /// }
-  /// ```
-  @override
-  Stream<CreateChatCompletionStreamResponse> createChatCompletionStream({
-    required CreateChatCompletionRequest request,
-  }) async* {
-    // Get the model ID for the response
-    final requestModel = request.model.map(model: (m) => m.value.toString(), modelId: (m) => m.value);
-
-    // Convert OpenAI request to Anthropic request
-    final anthropicRequest = _requestConverter.convert(request);
-
-    // Create the stream transformer
-    final transformer = StreamEventTransformer(requestModel: requestModel);
-
-    // Call Anthropic streaming API and transform events
-    yield* _anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
-  }
-
-  /// Closes the underlying Anthropic client.
-  @override
-  void endSession() {
-    _anthropicClient.close();
-    super.endSession();
-  }
+  ChatResource get chat => _anthropicChat ??= _AnthropicChatResource(
+    anthropicClient: _anthropicClient,
+    requestConverter: _requestConverter,
+    responseConverter: _responseConverter,
+    // These base resource fields are required by the parent class but unused
+    // since our overridden create()/createStream() bypass OpenAI's HTTP pipeline.
+    config: config,
+    httpClient: _ownHttpClient ?? http.Client(),
+    interceptorChain: interceptorChain,
+    requestBuilder: RequestBuilder(config: config),
+  );
 
   /// Creates a chat completion with document input and structured JSON output.
   ///
@@ -167,19 +143,6 @@ class AnthropicOpenAIClient extends OpenAIClient {
   /// - [maxTokens]: Maximum tokens in the response (defaults to 8192)
   ///
   /// Returns a Map containing the structured output matching the provided schema.
-  ///
-  /// Example:
-  /// ```dart
-  /// final result = await client.createDocumentCompletion(
-  ///   systemPrompt: 'You are a document parser.',
-  ///   userPrompt: 'Extract the key information from this document.',
-  ///   documentBytes: pdfBytes,
-  ///   documentMediaType: 'application/pdf',
-  ///   outputSchema: {'type': 'object', 'properties': {...}},
-  ///   outputToolName: 'extract_info',
-  ///   outputToolDescription: 'Extracts structured information from the document',
-  /// );
-  /// ```
   Future<Map<String, dynamic>> createDocumentCompletion({
     String? systemPrompt,
     required String userPrompt,
@@ -242,90 +205,81 @@ class AnthropicOpenAIClient extends OpenAIClient {
     );
   }
 
-  // ============================================================================
-  // Unsupported Methods
-  // ============================================================================
-  // The following methods are part of the OpenAI API but cannot be translated
-  // to Anthropic equivalents. They throw UnsupportedError when called.
-
-  /// Not supported - Anthropic does not have an embeddings API.
+  /// Closes the underlying Anthropic client.
   @override
-  Future<CreateEmbeddingResponse> createEmbedding({required CreateEmbeddingRequest request}) {
-    throw UnsupportedError(
-      'createEmbedding is not supported by Anthropic. '
-      'Consider using a dedicated embedding service.',
-    );
+  void close() {
+    _anthropicClient.close();
+    super.close();
+  }
+}
+
+// ============================================================================
+// Internal resource classes to intercept chat completions
+// ============================================================================
+
+class _AnthropicChatResource extends ChatResource {
+  final anthropic.AnthropicClient anthropicClient;
+  final ChatCompletionRequestConverter requestConverter;
+  final ChatCompletionResponseConverter responseConverter;
+
+  _AnthropicChatResource({
+    required this.anthropicClient,
+    required this.requestConverter,
+    required this.responseConverter,
+    required super.config,
+    required super.httpClient,
+    required super.interceptorChain,
+    required super.requestBuilder,
+  });
+
+  _AnthropicChatCompletionsResource? _anthropicCompletions;
+
+  @override
+  ChatCompletionsResource get completions => _anthropicCompletions ??= _AnthropicChatCompletionsResource(
+    anthropicClient: anthropicClient,
+    requestConverter: requestConverter,
+    responseConverter: responseConverter,
+    config: config,
+    httpClient: httpClient,
+    interceptorChain: interceptorChain,
+    requestBuilder: requestBuilder,
+  );
+}
+
+class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
+  final anthropic.AnthropicClient anthropicClient;
+  final ChatCompletionRequestConverter requestConverter;
+  final ChatCompletionResponseConverter responseConverter;
+
+  _AnthropicChatCompletionsResource({
+    required this.anthropicClient,
+    required this.requestConverter,
+    required this.responseConverter,
+    required super.config,
+    required super.httpClient,
+    required super.interceptorChain,
+    required super.requestBuilder,
+  });
+
+  @override
+  Future<ChatCompletion> create(
+    ChatCompletionCreateRequest request, {
+    Future<void>? abortTrigger,
+  }) async {
+    final requestModel = request.model;
+    final anthropicRequest = requestConverter.convert(request);
+    final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
+    return responseConverter.convert(anthropicResponse, requestModel);
   }
 
-  /// Not supported - Anthropic does not have a completions API (legacy).
   @override
-  Future<CreateCompletionResponse> createCompletion({required CreateCompletionRequest request}) {
-    throw UnsupportedError(
-      'createCompletion is not supported by Anthropic. '
-      'Use createChatCompletion instead.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have a completions API (legacy).
-  @override
-  Stream<CreateCompletionResponse> createCompletionStream({required CreateCompletionRequest request}) {
-    throw UnsupportedError(
-      'createCompletionStream is not supported by Anthropic. '
-      'Use createChatCompletionStream instead.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have an image generation API.
-  @override
-  Future<ImagesResponse> createImage({required CreateImageRequest request}) {
-    throw UnsupportedError(
-      'createImage is not supported by Anthropic. '
-      'Consider using a dedicated image generation service.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have a models listing API.
-  @override
-  Future<ListModelsResponse> listModels() {
-    throw UnsupportedError(
-      'listModels is not supported by Anthropic. '
-      'Refer to Anthropic documentation for available models.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have a model retrieval API.
-  @override
-  Future<Model> retrieveModel({required String model}) {
-    throw UnsupportedError(
-      'retrieveModel is not supported by Anthropic. '
-      'Refer to Anthropic documentation for model information.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have a fine-tuning API.
-  @override
-  Future<FineTuningJob> createFineTuningJob({required CreateFineTuningJobRequest request}) {
-    throw UnsupportedError('createFineTuningJob is not supported by Anthropic.');
-  }
-
-  /// Not supported - Anthropic does not have a moderation API.
-  @override
-  Future<CreateModerationResponse> createModeration({required CreateModerationRequest request}) {
-    throw UnsupportedError(
-      'createModeration is not supported by Anthropic. '
-      'Consider using a dedicated content moderation service.',
-    );
-  }
-
-  /// Not supported - Anthropic does not have an assistants API.
-  @override
-  Future<AssistantObject> createAssistant({required CreateAssistantRequest request}) {
-    throw UnsupportedError('Assistants API is not supported by Anthropic.');
-  }
-
-  /// Not supported - Anthropic does not have a threads API.
-  @override
-  Future<ThreadObject> createThread({CreateThreadRequest? request}) {
-    throw UnsupportedError('Threads API is not supported by Anthropic.');
+  Stream<ChatStreamEvent> createStream(
+    ChatCompletionCreateRequest request, {
+    Future<void>? abortTrigger,
+  }) {
+    final requestModel = request.model;
+    final anthropicRequest = requestConverter.convert(request);
+    final transformer = StreamEventTransformer(requestModel: requestModel);
+    return anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
   }
 }

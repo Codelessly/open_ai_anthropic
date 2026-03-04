@@ -16,22 +16,18 @@ class MessageContentConverter {
   ///
   /// In OpenAI, system prompts are messages with role "system" or "developer".
   /// In Anthropic, the system prompt is a top-level parameter.
-  String? extractSystemPrompt(List<ChatCompletionMessage> messages) {
+  String? extractSystemPrompt(List<ChatMessage> messages) {
     final systemMessages = <String>[];
 
     for (final message in messages) {
-      message.mapOrNull(
-        system: (msg) => systemMessages.add(msg.content),
-        developer: (msg) {
-          final content = msg.content.map(
-            parts: (parts) =>
-                parts.value.map((part) => part.mapOrNull(text: (t) => t.text)).whereType<String>().join('\n'),
-            text: (text) => text.value,
-          );
+      switch (message) {
+        case SystemMessage(:final content):
           systemMessages.add(content);
-          return content;
-        },
-      );
+        case DeveloperMessage(:final content):
+          systemMessages.add(content);
+        default:
+          break;
+      }
     }
 
     if (systemMessages.isEmpty) return null;
@@ -41,9 +37,7 @@ class MessageContentConverter {
   /// Converts OpenAI messages to Anthropic input messages.
   ///
   /// Filters out system/developer messages (handled separately as system prompt).
-  List<anthropic.InputMessage> convertMessages(
-    List<ChatCompletionMessage> messages,
-  ) {
+  List<anthropic.InputMessage> convertMessages(List<ChatMessage> messages) {
     final result = <anthropic.InputMessage>[];
 
     // Group tool messages that follow an assistant message with tool calls
@@ -52,14 +46,13 @@ class MessageContentConverter {
     for (int i = 0; i < messages.length; i++) {
       final message = messages[i];
 
-      message.mapOrNull(
-        system: (_) {
+      switch (message) {
+        case SystemMessage():
+        case DeveloperMessage():
           // Skip - handled by extractSystemPrompt
-        },
-        developer: (_) {
-          // Skip - handled by extractSystemPrompt
-        },
-        user: (msg) {
+          break;
+
+        case UserMessage():
           // If there are pending tool results, send them first as a user message
           if (pendingToolResults.isNotEmpty) {
             result.add(_createToolResultMessage(pendingToolResults));
@@ -69,11 +62,11 @@ class MessageContentConverter {
           result.add(
             anthropic.InputMessage(
               role: anthropic.MessageRole.user,
-              content: _convertUserContent(msg.content),
+              content: _convertUserContent(message.content),
             ),
           );
-        },
-        assistant: (msg) {
+
+        case AssistantMessage():
           // If there are pending tool results, send them first
           if (pendingToolResults.isNotEmpty) {
             result.add(_createToolResultMessage(pendingToolResults));
@@ -83,21 +76,14 @@ class MessageContentConverter {
           result.add(
             anthropic.InputMessage(
               role: anthropic.MessageRole.assistant,
-              content: _convertAssistantContent(msg),
+              content: _convertAssistantContent(message),
             ),
           );
-        },
-        tool: (msg) {
+
+        case ToolMessage(:final toolCallId, :final content):
           // Collect tool results to send as a single user message
-          pendingToolResults[msg.toolCallId] = msg.content;
-        },
-        function: (msg) {
-          // Deprecated - log warning
-          AnthropicOpenAILogger.warn(
-            'Function messages are deprecated. Use tool messages instead.',
-          );
-        },
-      );
+          pendingToolResults[toolCallId] = content;
+      }
     }
 
     // Send any remaining tool results
@@ -131,45 +117,31 @@ class MessageContentConverter {
   }
 
   /// Converts OpenAI user message content to Anthropic format.
-  anthropic.MessageContent _convertUserContent(
-    ChatCompletionUserMessageContent content,
-  ) {
-    return content.map(
-      string: (text) => anthropic.MessageContent.text(text.value),
-      parts: (parts) => anthropic.MessageContent.blocks(
-        parts.value.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList(),
+  anthropic.MessageContent _convertUserContent(UserMessageContent content) {
+    return switch (content) {
+      UserTextContent(:final text) => anthropic.MessageContent.text(text),
+      UserPartsContent(:final parts) => anthropic.MessageContent.blocks(
+        parts.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList(),
       ),
-    );
+    };
   }
 
   /// Converts a single content part to an Anthropic input block.
-  anthropic.InputContentBlock? _convertContentPart(
-    ChatCompletionMessageContentPart part,
-  ) {
-    return part.mapOrNull(
-      text: (textPart) => anthropic.InputContentBlock.text(textPart.text),
-      image: (imagePart) => _convertImagePart(imagePart),
-      audio: (audioPart) {
+  anthropic.InputContentBlock? _convertContentPart(ContentPart part) {
+    return switch (part) {
+      TextContentPart(:final text) => anthropic.InputContentBlock.text(text),
+      ImageContentPart(:final url) => _convertImagePart(url),
+      AudioContentPart() => () {
         AnthropicOpenAILogger.warn(
           'Audio input is not supported by Anthropic and will be ignored.',
         );
         return null;
-      },
-      refusal: (refusalPart) {
-        // Convert refusal to text for compatibility
-        return anthropic.InputContentBlock.text(
-          '[Refusal]: ${refusalPart.refusal}',
-        );
-      },
-    );
+      }(),
+    };
   }
 
   /// Converts an image content part to an Anthropic image block.
-  anthropic.InputContentBlock _convertImagePart(
-    ChatCompletionMessageContentPartImage part,
-  ) {
-    final url = part.imageUrl.url;
-
+  anthropic.InputContentBlock _convertImagePart(String url) {
     // Check if it's a data URL (base64)
     if (url.startsWith('data:')) {
       return _convertDataUrlImage(url);
@@ -208,9 +180,7 @@ class MessageContentConverter {
   }
 
   /// Converts OpenAI assistant message content to Anthropic format.
-  anthropic.MessageContent _convertAssistantContent(
-    ChatCompletionAssistantMessage msg,
-  ) {
+  anthropic.MessageContent _convertAssistantContent(AssistantMessage msg) {
     final blocks = <anthropic.InputContentBlock>[];
 
     // Add text content if present

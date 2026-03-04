@@ -8,46 +8,42 @@ void main() async {
   final jsonContent = File('claude_credentials.json').readAsStringSync();
   final credentials = ClaudeCodeCredentials.fromJson(jsonDecode(jsonContent));
 
-  // Create a client with your Anthropic API key
+  // Create a client with your Claude Code credentials
   final client = ClaudeCodeOpenAIClient(credentials: credentials);
 
   // Non-streaming example
   print('=== Non-streaming example ===\n');
-  final response = await client.createChatCompletion(
-    request: CreateChatCompletionRequest(
-      model: ChatCompletionModel.modelId('claude-sonnet-4-5'),
+  final response = await client.chat.completions.create(
+    ChatCompletionCreateRequest(
+      model: 'claude-sonnet-4-5',
       messages: [
-        ChatCompletionMessage.system(content: "You are Claude Code, Anthropic's official CLI for Claude."),
-        ChatCompletionMessage.user(
-          content: ChatCompletionUserMessageContent.string('Hi'),
-        ),
+        ChatMessage.system("You are Claude Code, Anthropic's official CLI for Claude."),
+        ChatMessage.user('Hi'),
       ],
     ),
   );
 
-  print('Response: ${response.choices.first.message.content}');
+  print('Response: ${response.text}');
   print('Model: ${response.model}');
   print('Provider: ${response.provider}');
 
   // Streaming example
   print('\n=== Streaming example ===\n');
-  final stream = client.createChatCompletionStream(
-    request: CreateChatCompletionRequest(
-      model: ChatCompletionModel.modelId('claude-sonnet-4-5'),
+  final stream = client.chat.completions.createStream(
+    ChatCompletionCreateRequest(
+      model: 'claude-sonnet-4-5',
       messages: [
-        ChatCompletionMessage.system(content: "You are Claude Code, Anthropic's official CLI for Claude."),
-        ChatCompletionMessage.user(
-          content: ChatCompletionUserMessageContent.string('Write a haiku about programming.'),
-        ),
+        ChatMessage.system("You are Claude Code, Anthropic's official CLI for Claude."),
+        ChatMessage.user('Write a haiku about programming.'),
       ],
     ),
   );
 
   await for (final chunk in stream) {
-    stdout.write(chunk.choices?.firstOrNull?.delta?.content ?? '');
+    stdout.write(chunk.textDelta ?? '');
   }
   print('\n');
 
   // Clean up
-  client.endSession();
+  client.close();
 }

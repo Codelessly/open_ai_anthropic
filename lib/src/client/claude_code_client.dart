@@ -15,21 +15,17 @@ import 'client.dart';
 /// An anthropic client that uses Claude Code OAuth instead of an API key.
 ///
 /// This client allows you to use Anthropic's Claude models with the same API
-/// interface as OpenAI's SDK. Simply provide your Anthropic API key and use
+/// interface as OpenAI's SDK. Simply provide your Claude Code credentials and use
 /// the client as you would use `OpenAIClient`.
 ///
 /// Example:
 /// ```dart
-/// final client = ClaudeCodeOpenAIClient(credentials: 'your-claude-code-credentials');
+/// final client = ClaudeCodeOpenAIClient(credentials: credentials);
 ///
-/// final response = await client.createChatCompletion(
-///   request: CreateChatCompletionRequest(
-///     model: ChatCompletionModel.modelId('claude-sonnet-4-20250514'),
-///     messages: [
-///       ChatCompletionMessage.user(
-///         content: ChatCompletionUserMessageContent.string('Hello!'),
-///       ),
-///     ],
+/// final response = await client.chat.completions.create(
+///   ChatCompletionCreateRequest(
+///     model: 'claude-sonnet-4-20250514',
+///     messages: [ChatMessage.user('Hello!')],
 ///   ),
 /// );
 /// ```
@@ -42,8 +38,6 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
   static const String anthropicBeta =
       'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14';
 
-  final Future<http.BaseRequest> Function(http.BaseRequest request)? onRequestCallback;
-
   /// Creates a new ClaudeCodeOpenAIClient.
   ClaudeCodeOpenAIClient({
     ClaudeCodeCredentials? credentials,
@@ -54,7 +48,6 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     super.retries = 3,
     TokenRefreshedCallback? onTokenRefreshed,
     this.debugLogNetworkRequests = false,
-    this.onRequestCallback,
   }) : assert(credentials != null || tokenStore != null, 'Either credentials or tokenStore must be provided.'),
        _tokenStore = tokenStore ?? ClaudeCodeTokenStore(credentials!, onTokenRefreshedCallback: onTokenRefreshed),
        super(apiKey: '');
@@ -68,10 +61,6 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     retries: anthropicRetries,
     debugLogNetworkRequests: debugLogNetworkRequests,
   );
-
-  @override
-  Future<http.BaseRequest> onRequest(http.BaseRequest request) async =>
-      onRequestCallback?.call(request) ?? super.onRequest(request);
 }
 
 class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {

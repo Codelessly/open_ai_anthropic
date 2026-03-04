@@ -14,18 +14,18 @@ class StopReasonMapper {
   /// - refusal → contentFilter (closest equivalent)
   /// - compaction → stop (no direct equivalent)
   /// - modelContextWindowExceeded → length (closest equivalent)
-  ChatCompletionFinishReason? toOpenAI(anthropic.StopReason? reason) {
+  FinishReason? toOpenAI(anthropic.StopReason? reason) {
     if (reason == null) return null;
 
     return switch (reason) {
-      anthropic.StopReason.endTurn => ChatCompletionFinishReason.stop,
-      anthropic.StopReason.maxTokens => ChatCompletionFinishReason.length,
-      anthropic.StopReason.stopSequence => ChatCompletionFinishReason.stop,
-      anthropic.StopReason.toolUse => ChatCompletionFinishReason.toolCalls,
-      anthropic.StopReason.pauseTurn => ChatCompletionFinishReason.stop,
-      anthropic.StopReason.refusal => ChatCompletionFinishReason.contentFilter,
-      anthropic.StopReason.compaction => ChatCompletionFinishReason.stop,
-      anthropic.StopReason.modelContextWindowExceeded => ChatCompletionFinishReason.length,
+      anthropic.StopReason.endTurn => FinishReason.stop,
+      anthropic.StopReason.maxTokens => FinishReason.length,
+      anthropic.StopReason.stopSequence => FinishReason.stop,
+      anthropic.StopReason.toolUse => FinishReason.toolCalls,
+      anthropic.StopReason.pauseTurn => FinishReason.stop,
+      anthropic.StopReason.refusal => FinishReason.contentFilter,
+      anthropic.StopReason.compaction => FinishReason.stop,
+      anthropic.StopReason.modelContextWindowExceeded => FinishReason.length,
     };
   }
 }

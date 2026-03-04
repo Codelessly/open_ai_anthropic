@@ -14,8 +14,8 @@ class ToolMapper {
     final properties = rawProperties is Map<String, dynamic>
         ? rawProperties
         : rawProperties is Map
-            ? Map<String, dynamic>.from(rawProperties)
-            : null;
+        ? Map<String, dynamic>.from(rawProperties)
+        : null;
     return anthropic.InputSchema(
       type: schema['type'] as String? ?? 'object',
       properties: properties,
@@ -24,9 +24,7 @@ class ToolMapper {
   }
 
   /// Converts OpenAI tools to Anthropic tool definitions.
-  List<anthropic.ToolDefinition>? toAnthropic(
-    List<ChatCompletionTool>? tools,
-  ) {
+  List<anthropic.ToolDefinition>? toAnthropic(List<Tool>? tools) {
     if (tools == null || tools.isEmpty) return null;
 
     return tools.map((tool) {
@@ -43,37 +41,33 @@ class ToolMapper {
 
   /// Converts OpenAI tool choice to Anthropic tool choice.
   anthropic.ToolChoice? toAnthropicToolChoice(
-    ChatCompletionToolChoiceOption? toolChoice,
+    ToolChoice? toolChoice,
     bool? parallelToolCalls,
   ) {
     if (toolChoice == null) return null;
 
     final disableParallel = parallelToolCalls == null ? null : !parallelToolCalls;
 
-    return toolChoice.map(
-      mode: (mode) => switch (mode.value) {
-        ChatCompletionToolChoiceMode.auto => anthropic.ToolChoice.auto(disableParallelToolUse: disableParallel),
-        ChatCompletionToolChoiceMode.required => anthropic.ToolChoice.any(disableParallelToolUse: disableParallel),
-        ChatCompletionToolChoiceMode.none => null,
-      },
-      tool: (named) => anthropic.ToolChoice.tool(
-        named.value.function.name,
+    return switch (toolChoice) {
+      ToolChoiceAuto() => anthropic.ToolChoice.auto(disableParallelToolUse: disableParallel),
+      ToolChoiceRequired() => anthropic.ToolChoice.any(disableParallelToolUse: disableParallel),
+      ToolChoiceNone() => null,
+      ToolChoiceFunction(:final name) => anthropic.ToolChoice.tool(
+        name,
         disableParallelToolUse: disableParallel,
       ),
-    );
+    };
   }
 
   /// Extracts tool calls from Anthropic response content blocks.
-  List<ChatCompletionMessageToolCall>? extractToolCalls(
-    List<anthropic.ContentBlock> blocks,
-  ) {
+  List<ToolCall>? extractToolCalls(List<anthropic.ContentBlock> blocks) {
     final toolCalls = blocks
         .whereType<anthropic.ToolUseBlock>()
         .map(
-          (toolUse) => ChatCompletionMessageToolCall(
+          (toolUse) => ToolCall(
             id: toolUse.id,
-            type: ChatCompletionMessageToolCallType.function,
-            function: ChatCompletionMessageFunctionCall(
+            type: 'function',
+            function: FunctionCall(
               name: toolUse.name,
               arguments: jsonEncode(toolUse.input),
             ),

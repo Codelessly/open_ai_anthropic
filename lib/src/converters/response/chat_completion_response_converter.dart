@@ -4,8 +4,7 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
-import '../request/chat_completion_request_converter.dart'
-    show jsonSchemaToolName;
+import '../request/chat_completion_request_converter.dart' show jsonSchemaToolName;
 
 /// Converts Anthropic message responses to OpenAI chat completion responses.
 class ChatCompletionResponseConverter {
@@ -15,23 +14,20 @@ class ChatCompletionResponseConverter {
     StopReasonMapper? stopReasonMapper,
   }) : _stopReasonMapper = stopReasonMapper ?? StopReasonMapper();
 
-  /// Converts an Anthropic Message to an OpenAI CreateChatCompletionResponse.
-  CreateChatCompletionResponse convert(
+  /// Converts an Anthropic Message to an OpenAI ChatCompletion.
+  ChatCompletion convert(
     anthropic.Message anthropicMessage,
     String requestModel,
   ) {
     // Check if the response contains a JSON schema tool call (structured output).
-    final jsonSchemaToolUse = anthropicMessage.toolUseBlocks
-        .where((b) => b.name == jsonSchemaToolName)
-        .firstOrNull;
+    final jsonSchemaToolUse = anthropicMessage.toolUseBlocks.where((b) => b.name == jsonSchemaToolName).firstOrNull;
 
     String? textContent;
     if (jsonSchemaToolUse != null) {
       // The structured output is in the tool's input — surface it as text content.
       textContent = jsonEncode(jsonSchemaToolUse.input);
     } else {
-      final textParts =
-          anthropicMessage.textBlocks.map((b) => b.text).toList();
+      final textParts = anthropicMessage.textBlocks.map((b) => b.text).toList();
       textContent = textParts.isEmpty ? null : textParts.join('\n');
     }
 
@@ -41,22 +37,19 @@ class ChatCompletionResponseConverter {
     // When JSON schema tool was used, the stop reason is "tool_use" but from
     // the caller's perspective this is a normal text response → map to "stop".
     final finishReason = jsonSchemaToolUse != null
-        ? ChatCompletionFinishReason.stop
+        ? FinishReason.stop
         : _stopReasonMapper.toOpenAI(anthropicMessage.stopReason);
 
-    final assistantMessage = ChatCompletionMessage.assistant(
-      content: textContent,
-      toolCalls: toolCalls,
-    );
-
-    final choice = ChatCompletionResponseChoice(
+    final choice = ChatChoice(
       index: 0,
-      message: assistantMessage as ChatCompletionAssistantMessage,
+      message: AssistantMessage(
+        content: textContent,
+        toolCalls: toolCalls,
+      ),
       finishReason: finishReason,
-      logprobs: null, // Anthropic doesn't provide logprobs
     );
 
-    return CreateChatCompletionResponse(
+    return ChatCompletion(
       id: anthropicMessage.id,
       choices: [choice],
       created: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -69,15 +62,14 @@ class ChatCompletionResponseConverter {
 
   /// Extracts tool calls from Anthropic response content blocks,
   /// excluding the internal [jsonSchemaToolName] tool.
-  List<ChatCompletionMessageToolCall>? _extractToolCalls(
-      anthropic.Message message) {
+  List<ToolCall>? _extractToolCalls(anthropic.Message message) {
     final toolCalls = message.toolUseBlocks
         .where((toolUse) => toolUse.name != jsonSchemaToolName)
         .map(
-          (toolUse) => ChatCompletionMessageToolCall(
+          (toolUse) => ToolCall(
             id: toolUse.id,
-            type: ChatCompletionMessageToolCallType.function,
-            function: ChatCompletionMessageFunctionCall(
+            type: 'function',
+            function: FunctionCall(
               name: toolUse.name,
               arguments: jsonEncode(toolUse.input),
             ),
@@ -88,9 +80,9 @@ class ChatCompletionResponseConverter {
     return toolCalls.isEmpty ? null : toolCalls;
   }
 
-  /// Converts Anthropic usage to OpenAI completion usage.
-  CompletionUsage _convertUsage(anthropic.Usage usage) {
-    return CompletionUsage(
+  /// Converts Anthropic usage to OpenAI usage.
+  Usage _convertUsage(anthropic.Usage usage) {
+    return Usage(
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,
       totalTokens: usage.inputTokens + usage.outputTokens,
