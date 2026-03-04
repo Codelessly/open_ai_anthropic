@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
@@ -57,25 +55,6 @@ class ToolMapper {
         disableParallelToolUse: disableParallel,
       ),
     };
-  }
-
-  /// Extracts tool calls from Anthropic response content blocks.
-  List<ToolCall>? extractToolCalls(List<anthropic.ContentBlock> blocks) {
-    final toolCalls = blocks
-        .whereType<anthropic.ToolUseBlock>()
-        .map(
-          (toolUse) => ToolCall(
-            id: toolUse.id,
-            type: 'function',
-            function: FunctionCall(
-              name: toolUse.name,
-              arguments: jsonEncode(toolUse.input),
-            ),
-          ),
-        )
-        .toList();
-
-    return toolCalls.isEmpty ? null : toolCalls;
   }
 
   /// Converts an OpenAI tool message to an Anthropic tool result block.

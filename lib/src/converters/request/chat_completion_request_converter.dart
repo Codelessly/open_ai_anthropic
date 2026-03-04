@@ -89,12 +89,9 @@ class ChatCompletionRequestConverter {
   }
 
   /// Converts OpenAI stop sequences to Anthropic format.
-  List<String>? _convertStopSequences(Object? stop) {
-    if (stop == null) return null;
-
-    if (stop is String) return [stop];
-    if (stop is List) return stop.cast<String>();
-    return null;
+  List<String>? _convertStopSequences(List<String>? stop) {
+    if (stop == null || stop.isEmpty) return null;
+    return stop;
   }
 
   /// Logs warnings for unsupported parameters.

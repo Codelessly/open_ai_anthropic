@@ -11,31 +11,27 @@
 ///
 /// final client = AnthropicOpenAIClient(apiKey: 'your-anthropic-api-key');
 ///
-/// final response = await client.createChatCompletion(
-///   request: CreateChatCompletionRequest(
-///     model: ChatCompletionModel.modelId('claude-sonnet-4-20250514'),
-///     messages: [
-///       ChatCompletionMessage.user(
-///         content: ChatCompletionUserMessageContent.string('Hello!'),
-///       ),
-///     ],
+/// final response = await client.chat.completions.create(
+///   ChatCompletionCreateRequest(
+///     model: 'claude-sonnet-4-20250514',
+///     messages: [ChatMessage.user('Hello!')],
 ///   ),
 /// );
 ///
-/// print(response.choices.first.message.content);
+/// print(response.text);
 /// ```
 ///
 /// For streaming responses:
 /// ```dart
-/// final stream = client.createChatCompletionStream(
-///   request: CreateChatCompletionRequest(
-///     model: ChatCompletionModel.modelId('claude-sonnet-4-20250514'),
-///     messages: [...],
+/// final stream = client.chat.completions.createStream(
+///   ChatCompletionCreateRequest(
+///     model: 'claude-sonnet-4-20250514',
+///     messages: [ChatMessage.user('Write a haiku.')],
 ///   ),
 /// );
 ///
 /// await for (final chunk in stream) {
-///   stdout.write(chunk.choices.first.delta?.content ?? '');
+///   stdout.write(chunk.textDelta ?? '');
 /// }
 /// ```
 library;

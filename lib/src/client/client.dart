@@ -34,6 +34,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
   final ChatCompletionRequestConverter _requestConverter;
   final ChatCompletionResponseConverter _responseConverter;
   final http.Client? _ownHttpClient;
+  late final http.Client _resourceHttpClient;
 
   final String _apiKey;
   final String _baseUrl;
@@ -81,6 +82,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
        _requestConverter = ChatCompletionRequestConverter(),
        _responseConverter = ChatCompletionResponseConverter(),
        super(httpClient: client) {
+    _resourceHttpClient = client ?? http.Client();
     _anthropicClient = buildAnthropicClient();
   }
 
@@ -119,7 +121,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     // These base resource fields are required by the parent class but unused
     // since our overridden create()/createStream() bypass OpenAI's HTTP pipeline.
     config: config,
-    httpClient: _ownHttpClient ?? http.Client(),
+    httpClient: _resourceHttpClient,
     interceptorChain: interceptorChain,
     requestBuilder: RequestBuilder(config: config),
   );
@@ -209,6 +211,9 @@ class AnthropicOpenAIClient extends OpenAIClient {
   @override
   void close() {
     _anthropicClient.close();
+    if (_ownHttpClient == null) {
+      _resourceHttpClient.close();
+    }
     super.close();
   }
 }
