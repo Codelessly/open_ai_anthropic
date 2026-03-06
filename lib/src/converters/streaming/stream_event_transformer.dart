@@ -120,11 +120,21 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         ? FinishReason.stop
         : stopReasonMapper.toOpenAI(event.delta.stopReason);
 
+    final inputTokens = event.usage.inputTokens ?? 0;
     final outputTokens = event.usage.outputTokens;
+    final cacheReadTokens = event.usage.cacheReadInputTokens ?? 0;
+    final cacheCreationTokens = event.usage.cacheCreationInputTokens ?? 0;
+
+    // Anthropic reports input_tokens as just the uncached portion.
+    // Sum all input categories to match OpenAI's convention where
+    // promptTokens is the total and cachedTokens is the cache-read subset.
+    final totalPromptTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
+
     final usage = Usage(
-      promptTokens: 0, // Not available in delta
+      promptTokens: totalPromptTokens,
       completionTokens: outputTokens,
-      totalTokens: outputTokens,
+      totalTokens: totalPromptTokens + outputTokens,
+      promptTokensDetails: cacheReadTokens > 0 ? PromptTokensDetails(cachedTokens: cacheReadTokens) : null,
     );
 
     return [
