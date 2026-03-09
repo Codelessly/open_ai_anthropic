@@ -140,42 +140,46 @@ class MessageContentConverter {
     };
   }
 
-  /// Converts an image content part to an Anthropic image block.
+  /// Converts a binary content part to the appropriate Anthropic block.
+  ///
+  /// In the OpenAI spec, `ContentPart.imageUrl()` carries all binary content
+  /// via data URIs. Dart's built-in [UriData] parses the MIME type, which
+  /// determines the Anthropic block type:
+  /// - `image/*` → [anthropic.InputContentBlock.image]
+  /// - `application/pdf` → [anthropic.InputContentBlock.document]
+  /// - Plain URLs → forwarded as-is (Anthropic resolves the type server-side)
   anthropic.InputContentBlock _convertImagePart(String url) {
-    // Check if it's a data URL (base64)
-    if (url.startsWith('data:')) {
-      return _convertDataUrlImage(url);
+    final uri = Uri.tryParse(url);
+    final dataUri = uri?.data;
+
+    // Not a data URI — forward as a plain URL.
+    if (dataUri == null) {
+      return anthropic.InputContentBlock.image(
+        anthropic.ImageSource.url(url),
+      );
     }
 
-    // It's a regular URL - use URL source
-    return anthropic.InputContentBlock.image(
-      anthropic.ImageSource.url(url),
-    );
-  }
+    final mimeType = dataUri.mimeType;
+    final base64Data = dataUri.contentText;
 
-  /// Converts a data URL to an Anthropic base64 image block.
-  anthropic.InputContentBlock _convertDataUrlImage(String dataUrl) {
-    // Parse data URL: data:[<mediatype>][;base64],<data>
-    final regex = RegExp(r'data:([^;,]+)(?:;base64)?,(.+)');
-    final match = regex.firstMatch(dataUrl);
-
-    if (match == null) {
-      throw FormatException('Invalid data URL format: $dataUrl');
+    // PDF → document block.
+    if (mimeType == 'application/pdf') {
+      return anthropic.InputContentBlock.document(
+        anthropic.DocumentSource.base64Pdf(base64Data),
+      );
     }
 
-    final mediaType = match.group(1) ?? 'image/jpeg';
-    final data = match.group(2) ?? '';
-
-    // Map media types to Anthropic supported types
-    final anthropicMediaType = switch (mediaType) {
+    // Image (or unknown) → image block.
+    final anthropicMediaType = switch (mimeType) {
       'image/png' => anthropic.ImageMediaType.png,
       'image/gif' => anthropic.ImageMediaType.gif,
       'image/webp' => anthropic.ImageMediaType.webp,
-      _ => anthropic.ImageMediaType.jpeg, // Default to JPEG
+      _ => anthropic.ImageMediaType.jpeg,
     };
 
     return anthropic.InputContentBlock.image(
-      anthropic.ImageSource.base64(data: data, mediaType: anthropicMediaType),
+      anthropic.ImageSource.base64(
+          data: base64Data, mediaType: anthropicMediaType),
     );
   }
 
