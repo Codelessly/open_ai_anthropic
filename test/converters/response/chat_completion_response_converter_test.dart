@@ -28,16 +28,17 @@ void main() {
       );
 
       final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final completion = result.completion;
 
       // Total prompt tokens should include cache tokens
       // (same logic as streaming: input + cacheRead + cacheCreation)
-      expect(result.usage?.promptTokens, 600); // 100 + 200 + 300
-      expect(result.usage?.completionTokens, 50);
-      expect(result.usage?.totalTokens, 650); // 600 + 50
+      expect(completion.usage?.promptTokens, 600); // 100 + 200 + 300
+      expect(completion.usage?.completionTokens, 50);
+      expect(completion.usage?.totalTokens, 650); // 600 + 50
 
       // Cache read tokens should be reported in promptTokensDetails
-      expect(result.usage?.promptTokensDetails, isNotNull);
-      expect(result.usage?.promptTokensDetails?.cachedTokens, 200);
+      expect(completion.usage?.promptTokensDetails, isNotNull);
+      expect(completion.usage?.promptTokensDetails?.cachedTokens, 200);
     });
 
     test('handles zero cache tokens gracefully', () {
@@ -55,12 +56,13 @@ void main() {
       );
 
       final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final completion = result.completion;
 
-      expect(result.usage?.promptTokens, 100);
-      expect(result.usage?.completionTokens, 50);
-      expect(result.usage?.totalTokens, 150);
+      expect(completion.usage?.promptTokens, 100);
+      expect(completion.usage?.completionTokens, 50);
+      expect(completion.usage?.totalTokens, 150);
       // No cache read tokens, so promptTokensDetails should be null
-      expect(result.usage?.promptTokensDetails, isNull);
+      expect(completion.usage?.promptTokensDetails, isNull);
     });
 
     test('reports cache tokens when only cache read is present', () {
@@ -79,10 +81,81 @@ void main() {
       );
 
       final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final completion = result.completion;
 
-      expect(result.usage?.promptTokens, 200); // 50 + 150 + 0
-      expect(result.usage?.totalTokens, 230); // 200 + 30
-      expect(result.usage?.promptTokensDetails?.cachedTokens, 150);
+      expect(completion.usage?.promptTokens, 200); // 50 + 150 + 0
+      expect(completion.usage?.totalTokens, 230); // 200 + 30
+      expect(completion.usage?.promptTokensDetails?.cachedTokens, 150);
+    });
+  });
+
+  group('Cache creation tokens in toJson output', () {
+    test('includes cache_creation_input_tokens in usage JSON', () {
+      final message = anthropic.Message(
+        id: 'msg_200',
+        type: 'message',
+        role: anthropic.MessageRole.assistant,
+        content: [anthropic.TextBlock(text: 'Hello!')],
+        model: 'claude-sonnet-4-20250514',
+        stopReason: anthropic.StopReason.endTurn,
+        usage: anthropic.Usage(
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationInputTokens: 500,
+        ),
+      );
+
+      final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final json = result.toJson();
+      final usageJson = json['usage'] as Map<String, dynamic>;
+
+      expect(usageJson['cache_creation_input_tokens'], 500);
+    });
+
+    test('includes cache_read_input_tokens in usage JSON', () {
+      final message = anthropic.Message(
+        id: 'msg_201',
+        type: 'message',
+        role: anthropic.MessageRole.assistant,
+        content: [anthropic.TextBlock(text: 'Hello!')],
+        model: 'claude-sonnet-4-20250514',
+        stopReason: anthropic.StopReason.endTurn,
+        usage: anthropic.Usage(
+          inputTokens: 50,
+          outputTokens: 30,
+          cacheReadInputTokens: 200,
+          cacheCreationInputTokens: 100,
+        ),
+      );
+
+      final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final json = result.toJson();
+      final usageJson = json['usage'] as Map<String, dynamic>;
+
+      expect(usageJson['cache_creation_input_tokens'], 100);
+      expect(usageJson['cache_read_input_tokens'], 200);
+    });
+
+    test('omits cache fields from JSON when zero', () {
+      final message = anthropic.Message(
+        id: 'msg_202',
+        type: 'message',
+        role: anthropic.MessageRole.assistant,
+        content: [anthropic.TextBlock(text: 'Hello!')],
+        model: 'claude-sonnet-4-20250514',
+        stopReason: anthropic.StopReason.endTurn,
+        usage: anthropic.Usage(
+          inputTokens: 100,
+          outputTokens: 50,
+        ),
+      );
+
+      final result = converter.convert(message, 'claude-sonnet-4-20250514');
+      final json = result.toJson();
+      final usageJson = json['usage'] as Map<String, dynamic>;
+
+      expect(usageJson.containsKey('cache_creation_input_tokens'), isFalse);
+      expect(usageJson.containsKey('cache_read_input_tokens'), isFalse);
     });
   });
 }

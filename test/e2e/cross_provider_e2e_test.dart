@@ -462,6 +462,122 @@ void main() {
         ? 'CLAUDE_CODE_CREDENTIALS not set'
         : null,
   );
+
+  test(
+    'E2E: streaming exposes Anthropic cache token fields in toJson usage',
+    () async {
+      final client = ClaudeCodeOpenAIClient(
+        credentials: claudeCredentials,
+        bodyTransformer: (body) {
+          final system = body['system'];
+          if (system is String) {
+            body['system'] = [
+              {
+                'type': 'text',
+                'text': system,
+                'cache_control': {'type': 'ephemeral'},
+              },
+            ];
+          }
+        },
+      );
+
+      final systemPrompt = largeSystemPrompt();
+
+      final request = oai.ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-20250514',
+        messages: [
+          oai.ChatMessage.system(systemPrompt),
+          oai.ChatMessage.user('What is 2+2? One word.'),
+        ],
+        maxCompletionTokens: 10,
+      );
+
+      // Make two requests. Between previous test runs and this one, the cache
+      // may already be warm, so we accept either creation or read tokens.
+      // The key assertion: at least one Anthropic-specific cache field appears
+      // in the toJson() output.
+      for (int i = 0; i < 2; i++) {
+        int? creation;
+        int? read;
+        await for (final chunk in client.chat.completions.createStream(request)) {
+          if (chunk.usage != null) {
+            final json = chunk.toJson();
+            final usageJson = json['usage'] as Map<String, dynamic>?;
+            creation = usageJson?['cache_creation_input_tokens'] as int?;
+            read = usageJson?['cache_read_input_tokens'] as int?;
+          }
+        }
+
+        print('Streaming request ${i + 1} - creation: $creation, read: $read');
+        final hasCache = (creation ?? 0) > 0 || (read ?? 0) > 0;
+        expect(hasCache, isTrue,
+            reason: 'Streaming request ${i + 1} should expose cache tokens in toJson. '
+                'creation: $creation, read: $read');
+      }
+
+      client.close();
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+    skip: claudeCredentials == null ? 'CLAUDE_CODE_CREDENTIALS not set' : null,
+  );
+
+  test(
+    'E2E: responseBodyTransformer receives Anthropic cache token fields (non-streaming)',
+    () async {
+      int? capturedCreation;
+      int? capturedRead;
+
+      final client = ClaudeCodeOpenAIClient(
+        credentials: claudeCredentials,
+        bodyTransformer: (body) {
+          final system = body['system'];
+          if (system is String) {
+            body['system'] = [
+              {
+                'type': 'text',
+                'text': system,
+                'cache_control': {'type': 'ephemeral'},
+              },
+            ];
+          }
+        },
+        responseBodyTransformer: (json) {
+          final usageJson = json['usage'] as Map<String, dynamic>?;
+          capturedCreation = usageJson?['cache_creation_input_tokens'] as int?;
+          capturedRead = usageJson?['cache_read_input_tokens'] as int?;
+        },
+      );
+
+      final systemPrompt = largeSystemPrompt();
+
+      final request = oai.ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-20250514',
+        messages: [
+          oai.ChatMessage.system(systemPrompt),
+          oai.ChatMessage.user('What is 3+3? One word.'),
+        ],
+        maxCompletionTokens: 10,
+      );
+
+      // Two requests — verify responseBodyTransformer captures cache fields.
+      for (int i = 0; i < 2; i++) {
+        capturedCreation = null;
+        capturedRead = null;
+        await client.chat.completions.create(request);
+        print('responseBodyTransformer request ${i + 1} - creation: $capturedCreation, read: $capturedRead');
+
+        final hasCache = (capturedCreation ?? 0) > 0 || (capturedRead ?? 0) > 0;
+        expect(hasCache, isTrue,
+            reason: 'responseBodyTransformer should receive cache tokens on request ${i + 1}. '
+                'creation: $capturedCreation, read: $capturedRead');
+      }
+
+      client.close();
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+    skip: claudeCredentials == null ? 'CLAUDE_CODE_CREDENTIALS not set' : null,
+  );
 }
 
 class _Round {

@@ -142,6 +142,8 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         state: state,
         finishReason: finishReason,
         usage: usage,
+        cacheCreationInputTokens: cacheCreationTokens,
+        cacheReadInputTokens: cacheReadTokens,
       ),
     ];
   }
@@ -297,8 +299,10 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
     ChatDelta? delta,
     FinishReason? finishReason,
     Usage? usage,
+    int cacheCreationInputTokens = 0,
+    int cacheReadInputTokens = 0,
   }) {
-    return ChatStreamEvent(
+    final event = ChatStreamEvent(
       id: state.messageId,
       choices: [
         ChatStreamChoice(
@@ -313,12 +317,61 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
       usage: usage,
       provider: 'anthropic',
     );
+
+    // Wrap with Anthropic-specific cache fields if present.
+    if (cacheCreationInputTokens > 0 || cacheReadInputTokens > 0) {
+      return _AnthropicChatStreamEvent(
+        base: event,
+        cacheCreationInputTokens: cacheCreationInputTokens,
+        cacheReadInputTokens: cacheReadInputTokens,
+      );
+    }
+
+    return event;
   }
 
   Exception _convertError(anthropic.ErrorEvent event) {
     return Exception(
       'Anthropic stream error (${event.errorType}): ${event.message}',
     );
+  }
+}
+
+/// A [ChatStreamEvent] that injects Anthropic-specific cache token fields
+/// into its [toJson] output.
+class _AnthropicChatStreamEvent extends ChatStreamEvent {
+  final int cacheCreationInputTokens;
+  final int cacheReadInputTokens;
+
+  _AnthropicChatStreamEvent({
+    required ChatStreamEvent base,
+    required this.cacheCreationInputTokens,
+    required this.cacheReadInputTokens,
+  }) : super(
+         id: base.id,
+         object: base.object,
+         created: base.created,
+         model: base.model,
+         choices: base.choices,
+         usage: base.usage,
+         systemFingerprint: base.systemFingerprint,
+         serviceTier: base.serviceTier,
+         provider: base.provider,
+       );
+
+  @override
+  Map<String, dynamic> toJson() {
+    final json = super.toJson();
+    final usage = json['usage'];
+    if (usage is Map<String, dynamic>) {
+      if (cacheCreationInputTokens > 0) {
+        usage['cache_creation_input_tokens'] = cacheCreationInputTokens;
+      }
+      if (cacheReadInputTokens > 0) {
+        usage['cache_read_input_tokens'] = cacheReadInputTokens;
+      }
+    }
+    return json;
   }
 }
 

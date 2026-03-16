@@ -50,6 +50,15 @@ class AnthropicOpenAIClient extends OpenAIClient {
   /// Optional callback to mutate the Anthropic request body before sending.
   final BodyTransformer? bodyTransformer;
 
+  /// Optional callback that receives the Anthropic response body (as JSON)
+  /// after each **non-streaming** API call. Use this to extract
+  /// provider-specific fields like `cache_creation_input_tokens` that have
+  /// no OpenAI equivalent.
+  ///
+  /// For streaming, these fields are available directly on each chunk's
+  /// `toJson()['usage']` output instead.
+  final BodyTransformer? responseBodyTransformer;
+
   /// The Anthropic API key.
   String get apiKey => _apiKey;
 
@@ -82,6 +91,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     int retries = 3,
     http.Client? client,
     this.bodyTransformer,
+    this.responseBodyTransformer,
   }) : _apiKey = apiKey,
        _baseUrl = baseUrl,
        _headers = headers,
@@ -128,6 +138,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     requestConverter: _requestConverter,
     responseConverter: _responseConverter,
     bodyTransformer: bodyTransformer,
+    responseBodyTransformer: responseBodyTransformer,
     // These base resource fields are required by the parent class but unused
     // since our overridden create()/createStream() bypass OpenAI's HTTP pipeline.
     config: config,
@@ -237,12 +248,14 @@ class _AnthropicChatResource extends ChatResource {
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
   final BodyTransformer? bodyTransformer;
+  final BodyTransformer? responseBodyTransformer;
 
   _AnthropicChatResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
     this.bodyTransformer,
+    this.responseBodyTransformer,
     required super.config,
     required super.httpClient,
     required super.interceptorChain,
@@ -257,6 +270,7 @@ class _AnthropicChatResource extends ChatResource {
     requestConverter: requestConverter,
     responseConverter: responseConverter,
     bodyTransformer: bodyTransformer,
+    responseBodyTransformer: responseBodyTransformer,
     config: config,
     httpClient: httpClient,
     interceptorChain: interceptorChain,
@@ -269,12 +283,14 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
   final BodyTransformer? bodyTransformer;
+  final BodyTransformer? responseBodyTransformer;
 
   _AnthropicChatCompletionsResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
     this.bodyTransformer,
+    this.responseBodyTransformer,
     required super.config,
     required super.httpClient,
     required super.interceptorChain,
@@ -289,7 +305,18 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer);
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
-    return responseConverter.convert(anthropicResponse, requestModel);
+    final converted = responseConverter.convert(anthropicResponse, requestModel);
+
+    if (responseBodyTransformer != null) {
+      try {
+        final json = converted.toJson();
+        responseBodyTransformer!(json);
+      } catch (_) {
+        // Don't let a transformer error swallow a successful API response.
+      }
+    }
+
+    return converted.completion;
   }
 
   @override

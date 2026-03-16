@@ -24,5 +24,21 @@ void main() {
       expect(client.bodyTransformer, isNull);
       client.close();
     });
+
+    test('accepts responseBodyTransformer parameter', () {
+      final client = AnthropicOpenAIClient(
+        apiKey: 'test-key',
+        responseBodyTransformer: (body) {},
+      );
+      expect(client, isNotNull);
+      expect(client.responseBodyTransformer, isNotNull);
+      client.close();
+    });
+
+    test('responseBodyTransformer defaults to null', () {
+      final client = AnthropicOpenAIClient(apiKey: 'test-key');
+      expect(client.responseBodyTransformer, isNull);
+      client.close();
+    });
   });
 }
