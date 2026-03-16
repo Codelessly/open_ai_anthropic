@@ -12,6 +12,11 @@ import '../converters/request/chat_completion_request_converter.dart';
 import '../converters/response/chat_completion_response_converter.dart';
 import '../converters/streaming/stream_event_transformer.dart';
 
+/// Callback that receives the Anthropic request body as a mutable JSON map
+/// before it is sent to the API. Use this to apply cache breakpoints or
+/// other provider-specific mutations.
+typedef BodyTransformer = void Function(Map<String, dynamic> body);
+
 /// A client that exposes OpenAI's API interface but uses Anthropic's Claude models.
 ///
 /// This client extends [OpenAIClient] and can be used as a drop-in replacement
@@ -41,6 +46,9 @@ class AnthropicOpenAIClient extends OpenAIClient {
   final Map<String, String> _headers;
   final Map<String, dynamic> _queryParams;
   final int _retries;
+
+  /// Optional callback to mutate the Anthropic request body before sending.
+  final BodyTransformer? bodyTransformer;
 
   /// The Anthropic API key.
   String get apiKey => _apiKey;
@@ -73,6 +81,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     Map<String, dynamic> queryParams = const {},
     int retries = 3,
     http.Client? client,
+    this.bodyTransformer,
   }) : _apiKey = apiKey,
        _baseUrl = baseUrl,
        _headers = headers,
@@ -118,6 +127,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     anthropicClient: _anthropicClient,
     requestConverter: _requestConverter,
     responseConverter: _responseConverter,
+    bodyTransformer: bodyTransformer,
     // These base resource fields are required by the parent class but unused
     // since our overridden create()/createStream() bypass OpenAI's HTTP pipeline.
     config: config,
@@ -226,11 +236,13 @@ class _AnthropicChatResource extends ChatResource {
   final anthropic.AnthropicClient anthropicClient;
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
+  final BodyTransformer? bodyTransformer;
 
   _AnthropicChatResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    this.bodyTransformer,
     required super.config,
     required super.httpClient,
     required super.interceptorChain,
@@ -244,6 +256,7 @@ class _AnthropicChatResource extends ChatResource {
     anthropicClient: anthropicClient,
     requestConverter: requestConverter,
     responseConverter: responseConverter,
+    bodyTransformer: bodyTransformer,
     config: config,
     httpClient: httpClient,
     interceptorChain: interceptorChain,
@@ -255,11 +268,13 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   final anthropic.AnthropicClient anthropicClient;
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
+  final BodyTransformer? bodyTransformer;
 
   _AnthropicChatCompletionsResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    this.bodyTransformer,
     required super.config,
     required super.httpClient,
     required super.interceptorChain,
@@ -272,7 +287,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) async {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request);
+    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer);
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
     return responseConverter.convert(anthropicResponse, requestModel);
   }
@@ -283,7 +298,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request);
+    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer);
     final transformer = StreamEventTransformer(requestModel: requestModel);
     return anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
   }

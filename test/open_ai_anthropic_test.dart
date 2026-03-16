@@ -8,5 +8,21 @@ void main() {
       expect(client, isNotNull);
       client.close();
     });
+
+    test('accepts bodyTransformer parameter', () {
+      final client = AnthropicOpenAIClient(
+        apiKey: 'test-key',
+        bodyTransformer: (body) {},
+      );
+      expect(client, isNotNull);
+      expect(client.bodyTransformer, isNotNull);
+      client.close();
+    });
+
+    test('bodyTransformer defaults to null', () {
+      final client = AnthropicOpenAIClient(apiKey: 'test-key');
+      expect(client.bodyTransformer, isNull);
+      client.close();
+    });
   });
 }

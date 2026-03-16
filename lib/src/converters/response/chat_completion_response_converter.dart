@@ -82,10 +82,20 @@ class ChatCompletionResponseConverter {
 
   /// Converts Anthropic usage to OpenAI usage.
   Usage _convertUsage(anthropic.Usage usage) {
+    final inputTokens = usage.inputTokens;
+    final outputTokens = usage.outputTokens;
+    final cacheReadTokens = usage.cacheReadInputTokens ?? 0;
+    final cacheCreationTokens = usage.cacheCreationInputTokens ?? 0;
+
+    // Sum all input categories to match OpenAI's convention where
+    // promptTokens is the total and cachedTokens is the cache-read subset.
+    final totalPromptTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
+
     return Usage(
-      promptTokens: usage.inputTokens,
-      completionTokens: usage.outputTokens,
-      totalTokens: usage.inputTokens + usage.outputTokens,
+      promptTokens: totalPromptTokens,
+      completionTokens: outputTokens,
+      totalTokens: totalPromptTokens + outputTokens,
+      promptTokensDetails: cacheReadTokens > 0 ? PromptTokensDetails(cachedTokens: cacheReadTokens) : null,
     );
   }
 }

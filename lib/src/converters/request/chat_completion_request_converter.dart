@@ -23,7 +23,14 @@ class ChatCompletionRequestConverter {
        _toolMapper = toolMapper ?? ToolMapper();
 
   /// Converts an OpenAI ChatCompletionCreateRequest to an Anthropic MessageCreateRequest.
-  anthropic.MessageCreateRequest convert(ChatCompletionCreateRequest request) {
+  ///
+  /// If [bodyTransformer] is provided, the converted request is serialized to
+  /// JSON, passed to the transformer for mutation (e.g. adding cache_control
+  /// breakpoints), and then deserialized back to a typed request.
+  anthropic.MessageCreateRequest convert(
+    ChatCompletionCreateRequest request, {
+    void Function(Map<String, dynamic> body)? bodyTransformer,
+  }) {
     // Log warnings for unsupported parameters
     _logUnsupportedParams(request);
 
@@ -74,7 +81,7 @@ class ChatCompletionRequestConverter {
       toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
     }
 
-    return anthropic.MessageCreateRequest(
+    var anthropicRequest = anthropic.MessageCreateRequest(
       model: model,
       messages: messages,
       maxTokens: maxTokens,
@@ -86,6 +93,15 @@ class ChatCompletionRequestConverter {
       tools: tools,
       toolChoice: toolChoice,
     );
+
+    // Apply body transformer if provided (e.g. for cache breakpoints).
+    if (bodyTransformer != null) {
+      final body = anthropicRequest.toJson();
+      bodyTransformer(body);
+      anthropicRequest = anthropic.MessageCreateRequest.fromJson(body);
+    }
+
+    return anthropicRequest;
   }
 
   /// Converts OpenAI stop sequences to Anthropic format.

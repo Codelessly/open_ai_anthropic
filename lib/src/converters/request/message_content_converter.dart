@@ -178,8 +178,7 @@ class MessageContentConverter {
     };
 
     return anthropic.InputContentBlock.image(
-      anthropic.ImageSource.base64(
-          data: base64Data, mediaType: anthropicMediaType),
+      anthropic.ImageSource.base64(data: base64Data, mediaType: anthropicMediaType),
     );
   }
 

@@ -1,107 +1,148 @@
-# OpenAI API for Anthropic (Claude && Claude Code)
+# OpenAI API for Anthropic (Claude & Claude Code)
 
-This package is a translation layer that allows you to use the OpenAI API interface to interact with Anthropic's Claude
-models. Anthropic is known for its own data models and API structure that is not compatible with OpenAI's API spec.
-This package bridges that gap by mapping OpenAI public API surface to Anthropic's API including models, endpoints, and
-parameters and data classes. `[anthropic_sdk_dart](https://pub.dev/packages/anthropic_sdk_dart)` is used under the hood
-to communicate with Anthropic's API.
+A translation layer that lets you use the OpenAI API interface to interact with Anthropic's Claude models. Maps the OpenAI public API surface to Anthropic's API — models, endpoints, parameters, and data classes. Uses [`anthropic_sdk_dart`](https://pub.dev/packages/anthropic_sdk_dart) under the hood.
 
 ## Installation
-Add the following to your `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  openai_anthropic: ^0.1.0
+  open_ai_anthropic: ^0.1.0
 ```
 
-Then run `flutter pub get` or `dart pub get` to install the package.
+Then run `dart pub get`.
 
 ## Usage
 
-### Generating OAuth credentials
+Use `AnthropicOpenAIClient` as a drop-in replacement for `OpenAIClient`. The rest of the OpenAI API remains the same — refer to [`openai_dart`](https://pub.dev/packages/openai_dart) for full documentation.
 
-Run following command to start the OAuth flow and generate credentials JSON. 
-Follow the instructions in the terminal to complete the flow. 
-This will generate a `claude_code_credentials.json` file in the current directory as well as print the credentials 
-JSON in the terminal which you can set as an environment variable.
-```console
-dart pub run openai_anthropic:generate
-```
-
-Use `AnthropicOpenAIClient` class instead of `OpenAIClient` and the rest of the OpenAI API remains the same. Refer
-[`openai_dart`](https://pub.dev/packages/openai_dart) package documentation for more details on how to use the OpenAI API.
+### API Key Authentication
 
 ```dart
-import 'package:openai_anthropic/openai_anthropic.dart';
+import 'package:open_ai_anthropic/open_ai_anthropic.dart';
+import 'package:openai_dart/openai_dart.dart';
 
-final apiKey = Platform.environment['ANTHROPIC_API_KEY'];
-final client = AnthropicOpenAIClient(apiKey: apiKey);
-```
+final client = AnthropicOpenAIClient(apiKey: 'your-anthropic-api-key');
 
-### Chat
-
-```dart
-final res = await client.createChatCompletion(
-  request: CreateChatCompletionRequest(
-    model: ChatCompletionModel.modelId('gpt-5'),
+final response = await client.chat.completions.create(
+  ChatCompletionCreateRequest(
+    model: 'claude-sonnet-4-20250514',
     messages: [
-      ChatCompletionMessage.developer(
-        content: 'You are a helpful assistant.',
-      ),
-      ChatCompletionMessage.user(
-        content: ChatCompletionUserMessageContent.string('Hello!'),
-      ),
+      ChatMessage.system('You are a helpful assistant.'),
+      ChatMessage.user('Hello!'),
     ],
   ),
 );
-print(res.choices.first.message.content);
-// Hello! How can I assist you today?
+print(response.choices.first.message.content);
 ```
 
-Refer [`openai_dart`](https://pub.dev/packages/openai_dart) package documentation for more details on how to use the OpenAI API.
-
-### Using Claude Code Client
+### Streaming
 
 ```dart
-// Using credentials JSON from env.
-final credentialsJson = Platform.environment['CLAUDE_CODE_CREDENTIALS'];
-final credentials = ClaudeCodeCredentials.fromJson(jsonDecode(credentialsJson!));
-final client = ClaudeCodeOpenAIClient(credentials: credentials);
-```
-You can also pass a `tokenStore` instead of `credentials` for more control over how tokens are stored and refreshed. To
-do so, extend `ClaudeCodeTokenStore` and implement the required methods.
+final stream = client.chat.completions.createStream(
+  ChatCompletionCreateRequest(
+    model: 'claude-sonnet-4-20250514',
+    messages: [ChatMessage.user('Write a haiku.')],
+  ),
+);
 
-How to use long-lived access token:
-
-You can generate a long-lived access token by running `claude setup-token` command.
-
-```dart
-final token = Platform.environment['CLAUDE_CODE_TOKEN'];
-final credentials = ClaudeCodeCredentials.fromToken(token);
-final client = ClaudeCodeOpenAIClient(credentials: credentials);
-```
-
-### Refreshing OAuth tokens
-
-```dart
-/// Refresh access token using refresh token
-static Future<Map<String, dynamic>> refreshAccessToken(String refreshToken) async {
-  final response = await http.post(
-    Uri.parse(ClaudeOAuthConfig.tokenUrl),
-    headers: ClaudeOAuthConfig.defaultHeaders,
-    body: jsonEncode({
-      'grant_type': 'refresh_token',
-      'client_id': ClaudeOAuthConfig.clientId,
-      'refresh_token': refreshToken,
-    }),
-  );
-
-  if (response.statusCode != 200) {
-    throw Exception('Token refresh failed: ${response.body}');
-  }
-
-  final Map<String, dynamic> tokens = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
-  tokens['expires_at'] = DateTime.timestamp().add(Duration(seconds: tokens['expires_in'])).millisecondsSinceEpoch;
-  return tokens;
+await for (final chunk in stream) {
+  stdout.write(chunk.textDelta ?? '');
 }
 ```
+
+### Claude Code Client (OAuth)
+
+For OAuth-based authentication (e.g. Claude Code tokens):
+
+```dart
+// From credentials JSON
+final credentialsJson = Platform.environment['CLAUDE_CODE_CREDENTIALS'];
+final credentials = ClaudeCodeCredentials.fromJsonString(credentialsJson!);
+final client = ClaudeCodeOpenAIClient(credentials: credentials);
+
+// Or from a long-lived access token (via `claude setup-token`)
+final token = Platform.environment['CLAUDE_CODE_TOKEN'];
+final credentials = ClaudeCodeCredentials.fromToken(token!);
+final client = ClaudeCodeOpenAIClient(credentials: credentials);
+```
+
+You can also pass a `ClaudeCodeTokenStore` instead of `credentials` for custom token storage and refresh logic.
+
+### Generating OAuth Credentials
+
+```console
+dart run open_ai_anthropic:generate
+```
+
+Follow the terminal instructions to complete the OAuth flow. This generates a `claude_code_credentials.json` file and prints the credentials JSON for use as an environment variable.
+
+## Cache Breakpoints
+
+Both `AnthropicOpenAIClient` and `ClaudeCodeOpenAIClient` accept an optional `bodyTransformer` callback. This receives the Anthropic request body as a mutable JSON map before it is sent to the API, allowing you to inject `cache_control` breakpoints or other provider-specific mutations.
+
+```dart
+final client = AnthropicOpenAIClient(
+  apiKey: 'your-key',
+  bodyTransformer: (body) {
+    // Cache the system message
+    final system = body['system'];
+    if (system is String) {
+      body['system'] = [
+        {
+          'type': 'text',
+          'text': system,
+          'cache_control': {'type': 'ephemeral'},
+        },
+      ];
+    }
+
+    // Cache the last two user messages
+    final messages = body['messages'];
+    if (messages is! List) return;
+    final userIndices = <int>[];
+    for (int i = 0; i < messages.length; i++) {
+      if (messages[i] is Map && messages[i]['role'] == 'user') {
+        userIndices.add(i);
+      }
+    }
+    final lastTwo = userIndices.length <= 2
+        ? userIndices
+        : userIndices.sublist(userIndices.length - 2);
+    for (final idx in lastTwo) {
+      final msg = messages[idx];
+      if (msg is! Map) continue;
+      final content = msg['content'];
+      if (content is String) {
+        msg['content'] = [
+          {
+            'type': 'text',
+            'text': content,
+            'cache_control': {'type': 'ephemeral'},
+          },
+        ];
+      }
+    }
+  },
+);
+```
+
+The `bodyTransformer` works on the **Anthropic-format JSON** body (with `system`, `messages`, `tools` keys). This is the same shape used by existing cache breakpoint utilities like `addCacheBreakpointsAnthropic()`.
+
+### Cache Token Reporting
+
+Cache token usage is reported in both streaming and non-streaming responses:
+
+```dart
+final response = await client.chat.completions.create(request);
+
+final usage = response.usage;
+print('Total prompt tokens: ${usage?.promptTokens}');       // includes cached
+print('Cached tokens: ${usage?.promptTokensDetails?.cachedTokens}'); // cache hits
+print('Completion tokens: ${usage?.completionTokens}');
+```
+
+`promptTokens` includes all input token categories (uncached + cache read + cache creation). `promptTokensDetails.cachedTokens` reports the cache-read subset, matching OpenAI's convention.
+
+## Cross-Provider Interoperability
+
+The OpenAI-format conversation history (`List<ChatMessage>`) can be shared seamlessly across providers. Tool calls, tool results, system messages, and assistant responses all translate 1:1 — no data is lost between OpenAI and Claude.

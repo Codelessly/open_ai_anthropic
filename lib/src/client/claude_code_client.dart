@@ -46,6 +46,7 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     super.headers,
     super.queryParams,
     super.retries = 3,
+    super.bodyTransformer,
     TokenRefreshedCallback? onTokenRefreshed,
     this.debugLogNetworkRequests = false,
   }) : assert(credentials != null || tokenStore != null, 'Either credentials or tokenStore must be provided.'),

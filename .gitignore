@@ -10,6 +10,8 @@ pubspec.lock
 
 claude_credentials.json
 
+.env
+
 .idea/
 
 build/
