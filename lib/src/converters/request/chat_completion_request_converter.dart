@@ -98,7 +98,9 @@ class ChatCompletionRequestConverter {
     if (bodyTransformer != null) {
       final body = anthropicRequest.toJson();
       bodyTransformer(body);
-      anthropicRequest = anthropic.MessageCreateRequest.fromJson(body);
+      anthropicRequest = anthropic.MessageCreateRequest.fromJson(
+        _deepCastJson(body),
+      );
     }
 
     return anthropicRequest;
@@ -108,6 +110,22 @@ class ChatCompletionRequestConverter {
   List<String>? _convertStopSequences(List<String>? stop) {
     if (stop == null || stop.isEmpty) return null;
     return stop;
+  }
+
+  /// Recursively casts all nested [Map] and [List] values to
+  /// `Map<String, dynamic>` and `List<dynamic>` respectively.
+  ///
+  /// Body transformers may produce `_Map<dynamic, dynamic>` via spread
+  /// operators or map literals, which `fromJson()` rejects with type cast
+  /// errors. This ensures the entire tree is properly typed.
+  static Map<String, dynamic> _deepCastJson(Map body) {
+    return body.map((key, value) => MapEntry(key as String, _deepCastValue(value)));
+  }
+
+  static dynamic _deepCastValue(dynamic value) {
+    if (value is Map) return _deepCastJson(value);
+    if (value is List) return value.map(_deepCastValue).toList();
+    return value;
   }
 
   /// Logs warnings for unsupported parameters.
