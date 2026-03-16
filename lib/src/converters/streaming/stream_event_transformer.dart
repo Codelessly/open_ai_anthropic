@@ -101,6 +101,13 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
     state.model = event.message.model;
     state.created = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
+    // Capture input usage — Anthropic reports cache token fields here,
+    // and message_delta may only contain output_tokens.
+    final usage = event.message.usage;
+    state.inputTokens = usage.inputTokens;
+    state.cacheCreationInputTokens = usage.cacheCreationInputTokens ?? 0;
+    state.cacheReadInputTokens = usage.cacheReadInputTokens ?? 0;
+
     // Emit initial chunk with role
     return [
       _createResponse(
@@ -120,10 +127,12 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         ? FinishReason.stop
         : stopReasonMapper.toOpenAI(event.delta.stopReason);
 
-    final inputTokens = event.usage.inputTokens ?? 0;
+    // message_delta may only have output_tokens. Fall back to values
+    // captured from message_start for input and cache token fields.
+    final inputTokens = event.usage.inputTokens ?? state.inputTokens;
     final outputTokens = event.usage.outputTokens;
-    final cacheReadTokens = event.usage.cacheReadInputTokens ?? 0;
-    final cacheCreationTokens = event.usage.cacheCreationInputTokens ?? 0;
+    final cacheReadTokens = event.usage.cacheReadInputTokens ?? state.cacheReadInputTokens;
+    final cacheCreationTokens = event.usage.cacheCreationInputTokens ?? state.cacheCreationInputTokens;
 
     // Anthropic reports input_tokens as just the uncached portion.
     // Sum all input categories to match OpenAI's convention where
@@ -388,6 +397,12 @@ class _StreamState {
   /// Block indices that belong to the internal JSON schema tool.
   /// Their input deltas are surfaced as text content, not tool call arguments.
   final Set<int> jsonSchemaBlockIndices = {};
+
+  /// Input usage from `message_start`. Anthropic reports cache token fields
+  /// here, and `message_delta` may only contain `output_tokens`.
+  int inputTokens = 0;
+  int cacheCreationInputTokens = 0;
+  int cacheReadInputTokens = 0;
 
   _StreamState({required String requestModel})
     : messageId = 'chatcmpl-${DateTime.now().millisecondsSinceEpoch}',
