@@ -2,6 +2,7 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 import 'package:test/test.dart';
 
+import 'package:open_ai_anthropic/open_ai_anthropic.dart';
 import 'package:open_ai_anthropic/src/converters/request/chat_completion_request_converter.dart';
 
 void main() {
@@ -415,6 +416,104 @@ void main() {
         returnsNormally,
         reason: 'OAuth cache_control injection on multi-part user message must not throw',
       );
+    });
+  });
+
+  // =========================================================================
+  // #15 — Conditional interleaved-thinking beta header
+  // #19 — API key client beta headers
+  // #9  — Cache TTL for long retention
+  // =========================================================================
+  group('Beta headers (#15, #19)', () {
+    test('ClaudeCodeOpenAIClient beta string omits interleaved-thinking for 4.6 models', () {
+      // pi-mono skips interleaved-thinking-2025-05-14 for adaptive thinking models
+      // because it's deprecated on 4.6 and redundant (adaptive auto-enables it).
+      final beta = ClaudeCodeOpenAIClient.buildBetaHeader('claude-sonnet-4-6');
+      expect(beta, isNot(contains('interleaved-thinking')),
+          reason: '4.6 models should not have interleaved-thinking beta');
+      expect(beta, contains('oauth-2025-04-20'));
+      expect(beta, contains('claude-code-20250219'));
+      expect(beta, contains('fine-grained-tool-streaming'));
+    });
+
+    test('ClaudeCodeOpenAIClient beta string includes interleaved-thinking for older models', () {
+      final beta = ClaudeCodeOpenAIClient.buildBetaHeader('claude-sonnet-4-5-20250929');
+      expect(beta, contains('interleaved-thinking-2025-05-14'),
+          reason: 'Older models need interleaved-thinking beta');
+      expect(beta, contains('oauth-2025-04-20'));
+      expect(beta, contains('claude-code-20250219'));
+    });
+  });
+
+  group('Cache TTL (#9)', () {
+    test('long cache retention adds ttl to cache_control', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('You are helpful.'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: true,
+        cacheRetention: CacheRetention.long,
+      );
+      final json = result.toJson();
+
+      // System prompt blocks should have ttl: "1h"
+      final system = json['system'] as List;
+      final firstBlock = system.first as Map;
+      final cc = firstBlock['cache_control'] as Map;
+      expect(cc['ttl'], '1h',
+          reason: 'Long retention should add ttl: "1h" to cache_control');
+    });
+
+    test('short cache retention has no ttl', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('You are helpful.'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: true,
+        cacheRetention: CacheRetention.short,
+      );
+      final json = result.toJson();
+
+      final system = json['system'] as List;
+      final firstBlock = system.first as Map;
+      final cc = firstBlock['cache_control'] as Map;
+      expect(cc.containsKey('ttl'), isFalse,
+          reason: 'Short retention should not have ttl');
+    });
+
+    test('none cache retention skips cache_control entirely', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('You are helpful.'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: true,
+        cacheRetention: CacheRetention.none,
+      );
+      final json = result.toJson();
+
+      // System should still have CC identity but blocks should NOT have cache_control
+      final system = json['system'] as List;
+      final firstBlock = system.first as Map;
+      expect(firstBlock.containsKey('cache_control'), isFalse,
+          reason: 'CacheRetention.none should skip cache_control');
     });
   });
 }

@@ -35,8 +35,24 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
 
   ClaudeCodeCredentials get credentials => _tokenStore.credentials;
 
+  /// Default beta header for non-model-specific use (includes all betas).
   static const String anthropicBeta =
       'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14';
+
+  /// Builds the anthropic-beta header value for a specific model.
+  /// For 4.6 models (adaptive thinking), omits the deprecated
+  /// interleaved-thinking beta header (#15).
+  static String buildBetaHeader(String modelId) {
+    final betas = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14'];
+    final needsInterleavedBeta = !modelId.contains('opus-4-6') &&
+        !modelId.contains('opus-4.6') &&
+        !modelId.contains('sonnet-4-6') &&
+        !modelId.contains('sonnet-4.6');
+    if (needsInterleavedBeta) {
+      betas.add('interleaved-thinking-2025-05-14');
+    }
+    return betas.join(',');
+  }
 
   /// Creates a new ClaudeCodeOpenAIClient.
   ClaudeCodeOpenAIClient({

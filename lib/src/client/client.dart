@@ -17,6 +17,18 @@ import '../converters/streaming/stream_event_transformer.dart';
 /// other provider-specific mutations.
 typedef BodyTransformer = void Function(Map<String, dynamic> body);
 
+/// Cache retention policy for Anthropic prompt caching.
+enum CacheRetention {
+  /// No caching — cache_control is omitted entirely.
+  none,
+
+  /// Short-lived cache (default). Uses `{type: "ephemeral"}`.
+  short,
+
+  /// Long-lived cache. Uses `{type: "ephemeral", ttl: "1h"}` on api.anthropic.com.
+  long,
+}
+
 /// A client that exposes OpenAI's API interface but uses Anthropic's Claude models.
 ///
 /// This client extends [OpenAIClient] and can be used as a drop-in replacement

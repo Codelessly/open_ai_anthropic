@@ -1,6 +1,7 @@
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
+import '../../client/client.dart' show CacheRetention;
 import '../../mappers/tool_mapper.dart';
 import '../../utils/logger.dart';
 import 'message_content_converter.dart';
@@ -42,6 +43,7 @@ class ChatCompletionRequestConverter {
     ChatCompletionCreateRequest request, {
     void Function(Map<String, dynamic> body)? bodyTransformer,
     bool isOAuth = false,
+    CacheRetention cacheRetention = CacheRetention.short,
   }) {
     // Log warnings for unsupported parameters
     _logUnsupportedParams(request);
@@ -95,17 +97,26 @@ class ChatCompletionRequestConverter {
     }
 
     // Build system prompt — for OAuth, prepend Claude Code identity with cache_control
+    // Cache control respects the retention policy (#9)
+    final cacheControl = cacheRetention == CacheRetention.none
+        ? null
+        : anthropic.CacheControlEphemeral(
+            ttl: cacheRetention == CacheRetention.long
+                ? anthropic.CacheTtl.ttl1h
+                : null,
+          );
+
     anthropic.SystemPrompt? system;
     if (isOAuth) {
       final blocks = <anthropic.SystemTextBlock>[
         anthropic.SystemTextBlock(
           text: _claudeCodeIdentity,
-          cacheControl: const anthropic.CacheControlEphemeral(),
+          cacheControl: cacheControl,
         ),
         if (systemPrompt != null)
           anthropic.SystemTextBlock(
             text: systemPrompt,
-            cacheControl: const anthropic.CacheControlEphemeral(),
+            cacheControl: cacheControl,
           ),
       ];
       system = anthropic.SystemPrompt.blocks(blocks);
@@ -164,8 +175,10 @@ class ChatCompletionRequestConverter {
       }
 
       // Apply cache_control to last user message's last content block
+      // Respects cacheRetention (#9)
+      final ccJson = cacheControl?.toJson();
       final msgs = body['messages'];
-      if (msgs is List) {
+      if (ccJson != null && msgs is List) {
         for (int i = msgs.length - 1; i >= 0; i--) {
           final msg = msgs[i];
           if (msg is Map && msg['role'] == 'user') {
@@ -175,7 +188,7 @@ class ChatCompletionRequestConverter {
                 {
                   'type': 'text',
                   'text': content,
-                  'cache_control': {'type': 'ephemeral'},
+                  'cache_control': ccJson,
                 },
               ];
               modified = true;
@@ -186,7 +199,7 @@ class ChatCompletionRequestConverter {
                 content[content.length - 1] = <String, dynamic>{
                   for (final e in lastBlock.entries)
                     e.key as String: e.value,
-                  'cache_control': <String, dynamic>{'type': 'ephemeral'},
+                  'cache_control': ccJson,
                 };
                 modified = true;
               }
