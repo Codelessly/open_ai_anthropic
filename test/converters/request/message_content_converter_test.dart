@@ -205,6 +205,35 @@ void main() {
   });
 
   // =========================================================================
+  // #18 — Unicode surrogate sanitization
+  // =========================================================================
+  group('unicode surrogate sanitization (#18)', () {
+    test('strips lone surrogates from user text content', () {
+      // Lone surrogates can appear in external data and cause API errors.
+      // U+D800 is a lone high surrogate.
+      final textWithSurrogate = 'Hello \uD800 World';
+      final messages = <ChatMessage>[
+        ChatMessage.user(textWithSurrogate),
+      ];
+
+      // Should not throw and should produce valid text
+      final result = converter.convertMessages(messages);
+      expect(result, hasLength(1));
+
+      switch (result.first.content) {
+        case anthropic.TextMessageContent(:final text):
+          // The lone surrogate should be stripped or replaced
+          expect(text.contains('\uD800'), isFalse,
+              reason: 'Lone surrogates should be sanitized');
+          expect(text, contains('Hello'));
+          expect(text, contains('World'));
+        default:
+          break; // Blocks format is also acceptable
+      }
+    });
+  });
+
+  // =========================================================================
   // #20 — Reverse tool name remapping in responses
   // =========================================================================
   group('reverse tool name remapping (#20)', () {

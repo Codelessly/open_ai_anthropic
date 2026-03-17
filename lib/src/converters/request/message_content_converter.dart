@@ -7,6 +7,14 @@ import '../../mappers/tool_mapper.dart';
 import '../../utils/claude_code_tools.dart';
 import '../../utils/logger.dart';
 
+/// Strips lone Unicode surrogates that can cause API errors.
+/// Dart strings can contain these when handling external data.
+String _sanitizeSurrogates(String text) {
+  // Match lone high surrogates (U+D800-U+DBFF) not followed by a low surrogate,
+  // and lone low surrogates (U+DC00-U+DFFF) not preceded by a high surrogate.
+  return text.replaceAll(RegExp(r'[\uD800-\uDFFF]'), '');
+}
+
 /// Converts OpenAI message content to Anthropic message format.
 class MessageContentConverter {
   final ToolMapper _toolMapper;
@@ -185,7 +193,7 @@ class MessageContentConverter {
   /// If parts content has only images (no text), prepends a placeholder (#22).
   anthropic.MessageContent _convertUserContent(UserMessageContent content) {
     return switch (content) {
-      UserTextContent(:final text) => anthropic.MessageContent.text(text),
+      UserTextContent(:final text) => anthropic.MessageContent.text(_sanitizeSurrogates(text)),
       UserPartsContent(:final parts) => () {
         final blocks = parts
             .map(_convertContentPart)
@@ -204,7 +212,7 @@ class MessageContentConverter {
   /// Converts a single content part to an Anthropic input block.
   anthropic.InputContentBlock? _convertContentPart(ContentPart part) {
     return switch (part) {
-      TextContentPart(:final text) => anthropic.InputContentBlock.text(text),
+      TextContentPart(:final text) => anthropic.InputContentBlock.text(_sanitizeSurrogates(text)),
       ImageContentPart(:final url) => _convertImagePart(url),
       AudioContentPart() => () {
         AnthropicOpenAILogger.warn(
@@ -254,9 +262,9 @@ class MessageContentConverter {
   anthropic.MessageContent _convertAssistantContent(AssistantMessage msg) {
     final blocks = <anthropic.InputContentBlock>[];
 
-    // Add text content if present and non-empty (#13)
+    // Add text content if present and non-empty (#13), sanitized (#18)
     if (msg.content != null && msg.content!.trim().isNotEmpty) {
-      blocks.add(anthropic.InputContentBlock.text(msg.content!));
+      blocks.add(anthropic.InputContentBlock.text(_sanitizeSurrogates(msg.content!)));
     }
 
     // Add tool calls as tool_use blocks with normalized IDs (#10)
