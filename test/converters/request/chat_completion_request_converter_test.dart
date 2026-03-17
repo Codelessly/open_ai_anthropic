@@ -390,5 +390,31 @@ void main() {
       final result = converter.convert(request, isOAuth: true);
       expect(result.maxTokens, greaterThan(4096));
     });
+
+    test('cache_control on last user message survives untyped map content from toJson', () {
+      // Reproduces production crash: toJson() produces content blocks as
+      // _Map<dynamic, dynamic>. The OAuth cache breakpoint injection spreads
+      // these maps, producing another _Map<dynamic, dynamic> which crashes
+      // when assigned back into the List.
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('System prompt.'),
+          ChatMessage.user(
+            UserMessageContent.parts([
+              ContentPart.text('Part 1'),
+              ContentPart.text('Part 2'),
+            ]),
+          ),
+        ],
+      );
+
+      // This must not throw _Map<dynamic, dynamic> type cast errors
+      expect(
+        () => converter.convert(request, isOAuth: true),
+        returnsNormally,
+        reason: 'OAuth cache_control injection on multi-part user message must not throw',
+      );
+    });
   });
 }

@@ -177,9 +177,10 @@ class ChatCompletionRequestConverter {
               final lastBlock = content.last;
               if (lastBlock is Map &&
                   !lastBlock.containsKey('cache_control')) {
-                content[content.length - 1] = {
-                  ...lastBlock,
-                  'cache_control': {'type': 'ephemeral'},
+                content[content.length - 1] = <String, dynamic>{
+                  for (final e in lastBlock.entries)
+                    e.key as String: e.value,
+                  'cache_control': <String, dynamic>{'type': 'ephemeral'},
                 };
                 modified = true;
               }
