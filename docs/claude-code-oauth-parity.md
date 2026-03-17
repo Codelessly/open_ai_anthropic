@@ -103,26 +103,26 @@ See the full 23-item diff below for items not yet implemented. Key ones:
 | 8 | Cache control on last user message | Done |
 | 10 | Tool call ID normalization | Done |
 
-### P1 — Not Yet Implemented
+### P1/P2 — Implemented
 
-| # | Item |
-|---|------|
-| 9 | Cache TTL for long retention (`ttl: "1h"`) |
-| 15 | Conditional interleaved-thinking beta header for 4.6 models |
-| 16 | Orphaned tool call synthetic error results |
-| 19 | API key client beta headers |
+| # | Item | Status |
+|---|------|--------|
+| 13 | Empty text block filtering | Done |
+| 14 | Consecutive toolResult merging | Done (pre-existing) |
+| 16 | Orphaned tool call synthetic error results | Done |
+| 18 | Unicode surrogate sanitization | Done |
+| 20 | Reverse tool name remapping in responses | Done |
+| 21 | Metadata user_id forwarding | Done |
+| 22 | Image-only content placeholder | Done |
+| 23 | Empty user message filtering | Done |
 
-### P2 — Not Yet Implemented
+### Remaining — Not Yet Implemented
 
-| # | Item |
-|---|------|
-| 11 | Thinking blocks with missing/empty signatures → plain text |
-| 12 | Redacted thinking block passthrough |
-| 13 | Empty text block filtering |
-| 14 | Consecutive toolResult merging (already implemented) |
-| 17 | Errored/aborted assistant message skipping |
-| 18 | Unicode surrogate sanitization |
-| 20 | Reverse tool name remapping in responses |
-| 21 | Metadata user_id forwarding |
-| 22 | Image-only content placeholder |
-| 23 | Empty user message filtering |
+| # | Item | Notes |
+|---|------|-------|
+| 9 | Cache TTL for long retention (`ttl: "1h"`) | Only matters for paid 1h caching |
+| 11 | Thinking blocks with missing/empty signatures → plain text | Requires thinking content in OpenAI message format |
+| 12 | Redacted thinking block passthrough | Requires thinking content in OpenAI message format |
+| 15 | Conditional interleaved-thinking beta header for 4.6 models | Deprecated header, works fine either way |
+| 17 | Errored/aborted assistant message skipping | OpenAI format doesn't carry stop reason on input messages |
+| 19 | API key client beta headers | Only affects non-OAuth clients |
