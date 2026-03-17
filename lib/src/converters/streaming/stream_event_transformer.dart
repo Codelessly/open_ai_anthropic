@@ -116,10 +116,20 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
 
     // Capture input usage — Anthropic reports cache token fields here,
     // and message_delta may only contain output_tokens.
+    // Fall back to nested cache_creation/cache_read objects when flat fields are null,
+    // as Anthropic may return data only in the nested format.
     final usage = event.message.usage;
     state.inputTokens = usage.inputTokens;
-    state.cacheCreationInputTokens = usage.cacheCreationInputTokens ?? 0;
-    state.cacheReadInputTokens = usage.cacheReadInputTokens ?? 0;
+    state.cacheCreationInputTokens = usage.cacheCreationInputTokens ??
+        (usage.cacheCreation != null
+            ? usage.cacheCreation!.ephemeral5mInputTokens +
+                usage.cacheCreation!.ephemeral1hInputTokens
+            : 0);
+    state.cacheReadInputTokens = usage.cacheReadInputTokens ??
+        (usage.cacheRead != null
+            ? usage.cacheRead!.ephemeral5mInputTokens +
+                usage.cacheRead!.ephemeral1hInputTokens
+            : 0);
 
     // Emit initial chunk with role
     return [

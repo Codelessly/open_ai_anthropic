@@ -100,8 +100,16 @@ class ChatCompletionResponseConverter {
         usage: _convertUsage(anthropicMessage.usage),
         provider: 'anthropic',
       ),
-      cacheCreationInputTokens: anthropicMessage.usage.cacheCreationInputTokens ?? 0,
-      cacheReadInputTokens: anthropicMessage.usage.cacheReadInputTokens ?? 0,
+      cacheCreationInputTokens: anthropicMessage.usage.cacheCreationInputTokens ??
+          (anthropicMessage.usage.cacheCreation != null
+              ? anthropicMessage.usage.cacheCreation!.ephemeral5mInputTokens +
+                  anthropicMessage.usage.cacheCreation!.ephemeral1hInputTokens
+              : 0),
+      cacheReadInputTokens: anthropicMessage.usage.cacheReadInputTokens ??
+          (anthropicMessage.usage.cacheRead != null
+              ? anthropicMessage.usage.cacheRead!.ephemeral5mInputTokens +
+                  anthropicMessage.usage.cacheRead!.ephemeral1hInputTokens
+              : 0),
     );
   }
 
@@ -119,9 +127,7 @@ class ChatCompletionResponseConverter {
             id: toolUse.id,
             type: 'function',
             function: FunctionCall(
-              name: isOAuth
-                  ? fromClaudeCodeName(toolUse.name, originalToolNames)
-                  : toolUse.name,
+              name: isOAuth ? fromClaudeCodeName(toolUse.name, originalToolNames) : toolUse.name,
               arguments: jsonEncode(toolUse.input),
             ),
           ),
@@ -132,11 +138,18 @@ class ChatCompletionResponseConverter {
   }
 
   /// Converts Anthropic usage to OpenAI usage.
+  /// Falls back to nested cache_creation/cache_read objects when flat fields are null.
   Usage _convertUsage(anthropic.Usage usage) {
     final inputTokens = usage.inputTokens;
     final outputTokens = usage.outputTokens;
-    final cacheReadTokens = usage.cacheReadInputTokens ?? 0;
-    final cacheCreationTokens = usage.cacheCreationInputTokens ?? 0;
+    final cacheReadTokens = usage.cacheReadInputTokens ??
+        (usage.cacheRead != null
+            ? usage.cacheRead!.ephemeral5mInputTokens + usage.cacheRead!.ephemeral1hInputTokens
+            : 0);
+    final cacheCreationTokens = usage.cacheCreationInputTokens ??
+        (usage.cacheCreation != null
+            ? usage.cacheCreation!.ephemeral5mInputTokens + usage.cacheCreation!.ephemeral1hInputTokens
+            : 0);
 
     // Sum all input categories to match OpenAI's convention where
     // promptTokens is the total and cachedTokens is the cache-read subset.

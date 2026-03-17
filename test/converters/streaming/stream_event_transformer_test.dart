@@ -58,8 +58,11 @@ void main() {
       final json = usageEvent.toJson();
       final usageJson = json['usage'] as Map<String, dynamic>;
 
-      expect(usageJson['cache_creation_input_tokens'], 500,
-          reason: 'cache_creation_input_tokens should be in toJson output');
+      expect(
+        usageJson['cache_creation_input_tokens'],
+        500,
+        reason: 'cache_creation_input_tokens should be in toJson output',
+      );
     });
 
     test('includes cache_read_input_tokens in toJson usage', () async {
@@ -168,8 +171,11 @@ void main() {
       final usageJson = json['usage'] as Map<String, dynamic>;
 
       // Cache creation tokens from message_start must appear in the output
-      expect(usageJson['cache_creation_input_tokens'], 17000,
-          reason: 'cache_creation_input_tokens from message_start should be preserved');
+      expect(
+        usageJson['cache_creation_input_tokens'],
+        17000,
+        reason: 'cache_creation_input_tokens from message_start should be preserved',
+      );
 
       // promptTokens should include input + cacheCreation
       expect(usageEvent.usage!.promptTokens, 17100); // 100 + 17000
@@ -277,6 +283,70 @@ void main() {
 
       expect(usageJson.containsKey('cache_creation_input_tokens'), isFalse);
       expect(usageJson.containsKey('cache_read_input_tokens'), isFalse);
+    });
+
+    test('reads cache creation from nested CacheCreation when flat field is null', () async {
+      // Anthropic may return cache data only in the nested format:
+      // cache_creation: {ephemeral_5m_input_tokens: N, ephemeral_1h_input_tokens: M}
+      // with cache_creation_input_tokens: null.
+      // The transformer must fall back to summing the nested object.
+      final transformer = StreamEventTransformer(requestModel: 'claude-sonnet-4-6');
+
+      final events = [
+        anthropic.MessageStartEvent(
+          message: anthropic.Message(
+            id: 'msg_nested',
+            type: 'message',
+            role: anthropic.MessageRole.assistant,
+            content: [],
+            model: 'claude-sonnet-4-6',
+            stopReason: null,
+            usage: anthropic.Usage(
+              inputTokens: 100,
+              outputTokens: 0,
+              // Flat field is null (not set)
+              cacheCreationInputTokens: null,
+              cacheReadInputTokens: null,
+              // But nested objects have the data
+              cacheCreation: anthropic.CacheCreation(
+                ephemeral5mInputTokens: 15000,
+                ephemeral1hInputTokens: 0,
+              ),
+            ),
+          ),
+        ),
+        anthropic.ContentBlockStartEvent(
+          index: 0,
+          contentBlock: anthropic.TextBlock(text: ''),
+        ),
+        anthropic.ContentBlockDeltaEvent(
+          index: 0,
+          delta: anthropic.TextDelta('Hi'),
+        ),
+        anthropic.ContentBlockStopEvent(index: 0),
+        anthropic.MessageDeltaEvent(
+          delta: anthropic.MessageDelta(stopReason: anthropic.StopReason.endTurn),
+          usage: anthropic.MessageDeltaUsage(outputTokens: 3),
+        ),
+        anthropic.MessageStopEvent(),
+      ];
+
+      final controller = StreamController<anthropic.MessageStreamEvent>();
+      final outputEvents = <ChatStreamEvent>[];
+
+      controller.stream.transform(transformer).listen(outputEvents.add);
+      for (final event in events) {
+        controller.add(event);
+      }
+      await controller.close();
+
+      final usageEvent = outputEvents.where((e) => e.usage != null).first;
+      final json = usageEvent.toJson();
+      final usageJson = json['usage'] as Map<String, dynamic>;
+
+      expect(usageJson['cache_creation_input_tokens'], 15000,
+          reason: 'Should fall back to nested CacheCreation when flat field is null');
+      expect(usageEvent.usage!.promptTokens, 15100); // 100 + 15000
     });
   });
 }
