@@ -357,7 +357,14 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   }) {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
-    final transformer = StreamEventTransformer(requestModel: requestModel);
+    final originalToolNames = isOAuth
+        ? request.tools?.map((t) => t.function.name).toList()
+        : null;
+    final transformer = StreamEventTransformer(
+      requestModel: requestModel,
+      isOAuth: isOAuth,
+      originalToolNames: originalToolNames,
+    );
     return anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
   }
 }

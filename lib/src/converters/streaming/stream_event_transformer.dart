@@ -4,6 +4,7 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
+import '../../utils/claude_code_tools.dart';
 import '../request/chat_completion_request_converter.dart' show jsonSchemaToolName;
 
 /// Transforms Anthropic MessageStreamEvents to OpenAI ChatStreamEvents.
@@ -13,12 +14,18 @@ import '../request/chat_completion_request_converter.dart' show jsonSchemaToolNa
 class StreamEventTransformer extends StreamTransformerBase<anthropic.MessageStreamEvent, ChatStreamEvent> {
   final String _requestModel;
   final StopReasonMapper _stopReasonMapper;
+  final bool _isOAuth;
+  final List<String>? _originalToolNames;
 
   StreamEventTransformer({
     required String requestModel,
     StopReasonMapper? stopReasonMapper,
+    bool isOAuth = false,
+    List<String>? originalToolNames,
   }) : _requestModel = requestModel,
-       _stopReasonMapper = stopReasonMapper ?? StopReasonMapper();
+       _stopReasonMapper = stopReasonMapper ?? StopReasonMapper(),
+       _isOAuth = isOAuth,
+       _originalToolNames = originalToolNames;
 
   @override
   Stream<ChatStreamEvent> bind(Stream<anthropic.MessageStreamEvent> stream) {
@@ -26,6 +33,8 @@ class StreamEventTransformer extends StreamTransformerBase<anthropic.MessageStre
       source: stream,
       requestModel: _requestModel,
       stopReasonMapper: _stopReasonMapper,
+      isOAuth: _isOAuth,
+      originalToolNames: _originalToolNames,
     );
   }
 }
@@ -34,11 +43,15 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
   final Stream<anthropic.MessageStreamEvent> source;
   final String requestModel;
   final StopReasonMapper stopReasonMapper;
+  final bool isOAuth;
+  final List<String>? originalToolNames;
 
   _TransformingStream({
     required this.source,
     required this.requestModel,
     required this.stopReasonMapper,
+    this.isOAuth = false,
+    this.originalToolNames,
   });
 
   @override
@@ -184,6 +197,11 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         final toolCallIndex = state.toolCallCount++;
         state.blockToolCallIndex[event.index] = toolCallIndex;
 
+        // Reverse-map CC canonical names back to original (#20)
+        final resolvedName = isOAuth
+            ? fromClaudeCodeName(name, originalToolNames)
+            : name;
+
         return [
           _createResponse(
             state: state,
@@ -194,7 +212,7 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
                   id: id,
                   type: 'function',
                   function: FunctionCallDelta(
-                    name: name,
+                    name: resolvedName,
                     arguments: '',
                   ),
                 ),
@@ -208,6 +226,10 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         final toolCallIndex = state.toolCallCount++;
         state.blockToolCallIndex[event.index] = toolCallIndex;
 
+        final resolvedName = isOAuth
+            ? fromClaudeCodeName(name, originalToolNames)
+            : name;
+
         return [
           _createResponse(
             state: state,
@@ -218,7 +240,7 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
                   id: id,
                   type: 'function',
                   function: FunctionCallDelta(
-                    name: name,
+                    name: resolvedName,
                     arguments: '',
                   ),
                 ),
