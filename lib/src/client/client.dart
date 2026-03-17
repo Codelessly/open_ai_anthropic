@@ -328,9 +328,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
-    final originalToolNames = isOAuth
-        ? request.tools?.map((t) => t.function.name).toList()
-        : null;
+    final originalToolNames = isOAuth ? request.tools?.map((t) => t.function.name).toList() : null;
     final converted = responseConverter.convert(
       anthropicResponse,
       requestModel,
@@ -357,9 +355,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   }) {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
-    final originalToolNames = isOAuth
-        ? request.tools?.map((t) => t.function.name).toList()
-        : null;
+    final originalToolNames = isOAuth ? request.tools?.map((t) => t.function.name).toList() : null;
     final transformer = StreamEventTransformer(
       requestModel: requestModel,
       isOAuth: isOAuth,

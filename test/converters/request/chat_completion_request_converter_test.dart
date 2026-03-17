@@ -429,8 +429,11 @@ void main() {
       // pi-mono skips interleaved-thinking-2025-05-14 for adaptive thinking models
       // because it's deprecated on 4.6 and redundant (adaptive auto-enables it).
       final beta = ClaudeCodeOpenAIClient.buildBetaHeader('claude-sonnet-4-6');
-      expect(beta, isNot(contains('interleaved-thinking')),
-          reason: '4.6 models should not have interleaved-thinking beta');
+      expect(
+        beta,
+        isNot(contains('interleaved-thinking')),
+        reason: '4.6 models should not have interleaved-thinking beta',
+      );
       expect(beta, contains('oauth-2025-04-20'));
       expect(beta, contains('claude-code-20250219'));
       expect(beta, contains('fine-grained-tool-streaming'));
@@ -438,8 +441,7 @@ void main() {
 
     test('ClaudeCodeOpenAIClient beta string includes interleaved-thinking for older models', () {
       final beta = ClaudeCodeOpenAIClient.buildBetaHeader('claude-sonnet-4-5-20250929');
-      expect(beta, contains('interleaved-thinking-2025-05-14'),
-          reason: 'Older models need interleaved-thinking beta');
+      expect(beta, contains('interleaved-thinking-2025-05-14'), reason: 'Older models need interleaved-thinking beta');
       expect(beta, contains('oauth-2025-04-20'));
       expect(beta, contains('claude-code-20250219'));
     });
@@ -466,8 +468,7 @@ void main() {
       final system = json['system'] as List;
       final firstBlock = system.first as Map;
       final cc = firstBlock['cache_control'] as Map;
-      expect(cc['ttl'], '1h',
-          reason: 'Long retention should add ttl: "1h" to cache_control');
+      expect(cc['ttl'], '1h', reason: 'Long retention should add ttl: "1h" to cache_control');
     });
 
     test('short cache retention has no ttl', () {
@@ -489,8 +490,7 @@ void main() {
       final system = json['system'] as List;
       final firstBlock = system.first as Map;
       final cc = firstBlock['cache_control'] as Map;
-      expect(cc.containsKey('ttl'), isFalse,
-          reason: 'Short retention should not have ttl');
+      expect(cc.containsKey('ttl'), isFalse, reason: 'Short retention should not have ttl');
     });
 
     test('none cache retention skips cache_control entirely', () {
@@ -512,8 +512,7 @@ void main() {
       // System should still have CC identity but blocks should NOT have cache_control
       final system = json['system'] as List;
       final firstBlock = system.first as Map;
-      expect(firstBlock.containsKey('cache_control'), isFalse,
-          reason: 'CacheRetention.none should skip cache_control');
+      expect(firstBlock.containsKey('cache_control'), isFalse, reason: 'CacheRetention.none should skip cache_control');
     });
   });
 }

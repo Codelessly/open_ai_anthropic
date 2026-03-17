@@ -35,9 +35,7 @@ class ToolMapper {
 
     return tools.map((tool) {
       final function = tool.function;
-      final name = isOAuth
-          ? toClaudeCodeName(function.name)
-          : function.name;
+      final name = isOAuth ? toClaudeCodeName(function.name) : function.name;
       return anthropic.ToolDefinition.custom(
         anthropic.Tool(
           name: name,

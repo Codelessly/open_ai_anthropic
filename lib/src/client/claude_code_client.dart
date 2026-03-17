@@ -44,7 +44,8 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
   /// interleaved-thinking beta header (#15).
   static String buildBetaHeader(String modelId) {
     final betas = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14'];
-    final needsInterleavedBeta = !modelId.contains('opus-4-6') &&
+    final needsInterleavedBeta =
+        !modelId.contains('opus-4-6') &&
         !modelId.contains('opus-4.6') &&
         !modelId.contains('sonnet-4-6') &&
         !modelId.contains('sonnet-4.6');

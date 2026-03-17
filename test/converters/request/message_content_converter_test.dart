@@ -39,8 +39,7 @@ void main() {
 
       // Should have: user, assistant, tool_result(synthetic), user
       // The synthetic tool result should be a user message with tool_result block
-      expect(result.length, 4,
-          reason: 'Should insert synthetic tool result for orphaned call');
+      expect(result.length, 4, reason: 'Should insert synthetic tool result for orphaned call');
 
       // The third message should be the synthetic tool result
       final syntheticMsg = result[2];
@@ -60,8 +59,16 @@ void main() {
         ChatMessage.user('Do two things'),
         ChatMessage.assistant(
           toolCalls: [
-            ToolCall(id: 'call_1', type: 'function', function: FunctionCall(name: 'tool_a', arguments: '{}')),
-            ToolCall(id: 'call_2', type: 'function', function: FunctionCall(name: 'tool_b', arguments: '{}')),
+            ToolCall(
+              id: 'call_1',
+              type: 'function',
+              function: FunctionCall(name: 'tool_a', arguments: '{}'),
+            ),
+            ToolCall(
+              id: 'call_2',
+              type: 'function',
+              function: FunctionCall(name: 'tool_b', arguments: '{}'),
+            ),
           ],
         ),
         // Only one tool result — call_2 is orphaned
@@ -88,8 +95,7 @@ void main() {
       }
 
       expect(allToolResults, contains('call_1'));
-      expect(allToolResults, contains('call_2'),
-          reason: 'Should have synthetic result for orphaned call_2');
+      expect(allToolResults, contains('call_2'), reason: 'Should have synthetic result for orphaned call_2');
     });
 
     test('does not insert synthetic results when all tool calls have results', () {
@@ -97,7 +103,11 @@ void main() {
         ChatMessage.user('Do something'),
         ChatMessage.assistant(
           toolCalls: [
-            ToolCall(id: 'call_1', type: 'function', function: FunctionCall(name: 'tool_a', arguments: '{}')),
+            ToolCall(
+              id: 'call_1',
+              type: 'function',
+              function: FunctionCall(name: 'tool_a', arguments: '{}'),
+            ),
           ],
         ),
         ChatMessage.tool(toolCallId: 'call_1', content: 'done'),
@@ -129,13 +139,11 @@ void main() {
         if (msg.role == anthropic.MessageRole.assistant) {
           switch (msg.content) {
             case anthropic.TextMessageContent(:final text):
-              expect(text.trim().isEmpty, isTrue,
-                  reason: 'Whitespace-only text should be filtered to empty');
+              expect(text.trim().isEmpty, isTrue, reason: 'Whitespace-only text should be filtered to empty');
             case anthropic.BlocksMessageContent(:final blocks):
               for (final block in blocks) {
                 if (block is anthropic.TextInputBlock) {
-                  expect(block.text.trim().isEmpty, isFalse,
-                      reason: 'Should not have whitespace-only text blocks');
+                  expect(block.text.trim().isEmpty, isFalse, reason: 'Should not have whitespace-only text blocks');
                 }
               }
           }
@@ -152,8 +160,7 @@ void main() {
       final result = converter.convertMessages(messages);
 
       // Empty user message should be skipped
-      expect(result.length, 1,
-          reason: 'Empty user message should be filtered out');
+      expect(result.length, 1, reason: 'Empty user message should be filtered out');
     });
   });
 
@@ -183,10 +190,8 @@ void main() {
       switch (assistantMsg.content) {
         case anthropic.BlocksMessageContent(:final blocks):
           final toolUse = blocks.whereType<anthropic.ToolUseInputBlock>().first;
-          expect(toolUse.id, isNot(contains('|')),
-              reason: 'Pipes should be normalized out of tool call IDs');
-          expect(toolUse.id, matches(RegExp(r'^[a-zA-Z0-9_-]+$')),
-              reason: 'ID should only contain valid characters');
+          expect(toolUse.id, isNot(contains('|')), reason: 'Pipes should be normalized out of tool call IDs');
+          expect(toolUse.id, matches(RegExp(r'^[a-zA-Z0-9_-]+$')), reason: 'ID should only contain valid characters');
         default:
           fail('Expected blocks content with tool_use');
       }
@@ -196,8 +201,7 @@ void main() {
       switch (toolResultMsg.content) {
         case anthropic.BlocksMessageContent(:final blocks):
           final toolResult = blocks.whereType<anthropic.ToolResultInputBlock>().first;
-          expect(toolResult.toolUseId, isNot(contains('|')),
-              reason: 'Tool result ID should also be normalized');
+          expect(toolResult.toolUseId, isNot(contains('|')), reason: 'Tool result ID should also be normalized');
         default:
           fail('Expected blocks content with tool_result');
       }
@@ -223,8 +227,7 @@ void main() {
       switch (result.first.content) {
         case anthropic.TextMessageContent(:final text):
           // The lone surrogate should be stripped or replaced
-          expect(text.contains('\uD800'), isFalse,
-              reason: 'Lone surrogates should be sanitized');
+          expect(text.contains('\uD800'), isFalse, reason: 'Lone surrogates should be sanitized');
           expect(text, contains('Hello'));
           expect(text, contains('World'));
         default:
@@ -267,8 +270,7 @@ void main() {
 
       final toolCalls = result.completion.choices.first.message.toolCalls;
       expect(toolCalls, isNotNull);
-      expect(toolCalls!.first.function.name, 'bash',
-          reason: 'Should remap CC name "Bash" back to original "bash"');
+      expect(toolCalls!.first.function.name, 'bash', reason: 'Should remap CC name "Bash" back to original "bash"');
     });
 
     test('response converter passes through non-CC tool names unchanged', () {
@@ -318,8 +320,7 @@ void main() {
       final result = requestConverter.convert(request, isOAuth: true);
       final json = result.toJson();
 
-      expect(json['metadata'], isNotNull,
-          reason: 'Should forward user as metadata.user_id');
+      expect(json['metadata'], isNotNull, reason: 'Should forward user as metadata.user_id');
       expect((json['metadata'] as Map)['user_id'], 'user-123');
     });
   });
@@ -344,8 +345,7 @@ void main() {
         case anthropic.BlocksMessageContent(:final blocks):
           // Should have a text block prepended before the image
           final hasText = blocks.any((b) => b is anthropic.TextInputBlock);
-          expect(hasText, isTrue,
-              reason: 'Image-only content should have a text placeholder prepended');
+          expect(hasText, isTrue, reason: 'Image-only content should have a text placeholder prepended');
         default:
           fail('Expected BlocksMessageContent');
       }
@@ -367,8 +367,7 @@ void main() {
       switch (userMsg.content) {
         case anthropic.BlocksMessageContent(:final blocks):
           final textBlocks = blocks.whereType<anthropic.TextInputBlock>().toList();
-          expect(textBlocks.length, 1,
-              reason: 'Should not add extra placeholder when text already exists');
+          expect(textBlocks.length, 1, reason: 'Should not add extra placeholder when text already exists');
           expect(textBlocks.first.text, 'Look at this');
         default:
           fail('Expected BlocksMessageContent');

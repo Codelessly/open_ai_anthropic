@@ -17,14 +17,11 @@ import 'package:test/test.dart';
   if (envFile.existsSync()) {
     for (final line in envFile.readAsLinesSync()) {
       final trimmed = line.trim();
-      if (trimmed.startsWith('OPENAI_API_KEY=') &&
-          (openAIKey == null || openAIKey.isEmpty)) {
+      if (trimmed.startsWith('OPENAI_API_KEY=') && (openAIKey == null || openAIKey.isEmpty)) {
         openAIKey = trimmed.substring('OPENAI_API_KEY='.length);
       }
-      if (trimmed.startsWith('CLAUDE_CODE_CREDENTIALS=') &&
-          claudeCredentials == null) {
-        claudeCredentials = ClaudeCodeCredentials.fromJsonString(
-            trimmed.substring('CLAUDE_CODE_CREDENTIALS='.length));
+      if (trimmed.startsWith('CLAUDE_CODE_CREDENTIALS=') && claudeCredentials == null) {
+        claudeCredentials = ClaudeCodeCredentials.fromJsonString(trimmed.substring('CLAUDE_CODE_CREDENTIALS='.length));
       }
     }
   }
@@ -75,8 +72,11 @@ void main() {
       // Tool name in response must match the ORIGINAL definition name
       if (msg.toolCalls != null && msg.toolCalls!.isNotEmpty) {
         for (final tc in msg.toolCalls!) {
-          expect(tc.function.name, 'get_weather',
-              reason: 'Non-streaming: tool name must match original definition, not CC canonical');
+          expect(
+            tc.function.name,
+            'get_weather',
+            reason: 'Non-streaming: tool name must match original definition, not CC canonical',
+          );
         }
       }
 
@@ -120,8 +120,11 @@ void main() {
 
       // Tool name in streaming response must also match original
       expect(streamedToolName, isNotNull, reason: 'Should have received a tool call');
-      expect(streamedToolName, 'get_weather',
-          reason: 'Streaming: tool name must match original definition, not CC canonical');
+      expect(
+        streamedToolName,
+        'get_weather',
+        reason: 'Streaming: tool name must match original definition, not CC canonical',
+      );
 
       client.close();
     },
@@ -141,7 +144,9 @@ void main() {
           description: 'Execute a bash command',
           parameters: {
             'type': 'object',
-            'properties': {'command': {'type': 'string'}},
+            'properties': {
+              'command': {'type': 'string'},
+            },
             'required': ['command'],
           },
         ),
@@ -175,8 +180,7 @@ void main() {
       print('CC-canonical streaming tool name: $streamedToolName');
       expect(streamedToolName, isNotNull);
       // MUST be "bash" (original), not "Bash" (CC canonical)
-      expect(streamedToolName, 'bash',
-          reason: 'Streaming must remap CC canonical "Bash" back to original "bash"');
+      expect(streamedToolName, 'bash', reason: 'Streaming must remap CC canonical "Bash" back to original "bash"');
 
       client.close();
     },
@@ -232,21 +236,29 @@ void main() {
 
       // GPT should be able to reference context from both prior rounds
       expect(gpt2Msg.content, isNotNull);
-      expect(gpt2Msg.content!.toLowerCase(),
-          anyOf(contains('france'), contains('japan')),
-          reason: 'GPT should recall context from both providers');
+      expect(
+        gpt2Msg.content!.toLowerCase(),
+        anyOf(contains('france'), contains('japan')),
+        reason: 'GPT should recall context from both providers',
+      );
 
       // Verify no Claude-specific artifacts leaked into messages
       for (final msg in history) {
         if (msg case oai.AssistantMessage(:final content)) {
           if (content != null) {
-            expect(content, isNot(contains('Claude Code')),
-                reason: 'CC identity should not leak into conversation history');
+            expect(
+              content,
+              isNot(contains('Claude Code')),
+              reason: 'CC identity should not leak into conversation history',
+            );
           }
         }
         if (msg case oai.SystemMessage(:final content)) {
-          expect(content, isNot(contains('Claude Code')),
-              reason: 'CC identity should not appear in user system messages');
+          expect(
+            content,
+            isNot(contains('Claude Code')),
+            reason: 'CC identity should not appear in user system messages',
+          );
         }
       }
 

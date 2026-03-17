@@ -1,10 +1,23 @@
 /// Claude Code 2.x canonical tool names.
 /// Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
 const List<String> _claudeCodeTools = [
-  'Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob',
-  'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'KillShell',
-  'NotebookEdit', 'Skill', 'Task', 'TaskOutput', 'TodoWrite',
-  'WebFetch', 'WebSearch',
+  'Read',
+  'Write',
+  'Edit',
+  'Bash',
+  'Grep',
+  'Glob',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'KillShell',
+  'NotebookEdit',
+  'Skill',
+  'Task',
+  'TaskOutput',
+  'TodoWrite',
+  'WebFetch',
+  'WebSearch',
 ];
 
 final Map<String, String> _ccToolLookup = {
@@ -13,8 +26,7 @@ final Map<String, String> _ccToolLookup = {
 
 /// Converts a tool name to Claude Code canonical casing (case-insensitive).
 /// Returns the original name if no match is found.
-String toClaudeCodeName(String name) =>
-    _ccToolLookup[name.toLowerCase()] ?? name;
+String toClaudeCodeName(String name) => _ccToolLookup[name.toLowerCase()] ?? name;
 
 /// Reverse-maps a Claude Code tool name back to the original tool name
 /// by doing a case-insensitive match against the provided tool name list.

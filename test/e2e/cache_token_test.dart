@@ -9,8 +9,7 @@ ClaudeCodeCredentials? _loadCreds() {
   if (envFile.existsSync()) {
     for (final line in envFile.readAsLinesSync()) {
       if (line.startsWith('CLAUDE_CODE_CREDENTIALS=')) {
-        return ClaudeCodeCredentials.fromJsonString(
-            line.substring('CLAUDE_CODE_CREDENTIALS='.length));
+        return ClaudeCodeCredentials.fromJsonString(line.substring('CLAUDE_CODE_CREDENTIALS='.length));
       }
     }
   }
@@ -51,104 +50,122 @@ Safety margin factor: ${((i % 10) + 1) * 0.1}. Redundancy level: ${(i % 4) + 1}.
 void main() {
   final creds = _loadCreds();
 
-  test('streaming: cache creation on first request, cache read on second', () async {
-    final client = ClaudeCodeOpenAIClient(credentials: creds);
-    final systemPrompt = _massiveSystemPrompt();
-    print('System prompt length: ${systemPrompt.length} chars');
+  test(
+    'streaming: cache creation on first request, cache read on second',
+    () async {
+      final client = ClaudeCodeOpenAIClient(credentials: creds);
+      final systemPrompt = _massiveSystemPrompt();
+      print('System prompt length: ${systemPrompt.length} chars');
 
-    final request = oai.ChatCompletionCreateRequest(
-      model: 'claude-sonnet-4-6',
-      messages: [
-        oai.ChatMessage.system(systemPrompt),
-        oai.ChatMessage.user('What is the value of parameter_5_alpha? Answer in one word.'),
-      ],
-      maxCompletionTokens: 16000,
-    );
+      final request = oai.ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          oai.ChatMessage.system(systemPrompt),
+          oai.ChatMessage.user('What is the value of parameter_5_alpha? Answer in one word.'),
+        ],
+        maxCompletionTokens: 16000,
+      );
 
-    // Round 1 — should create cache
-    int? r1Creation, r1Read, r1Prompt, r1Completion;
-    await for (final chunk in client.chat.completions.createStream(request)) {
-      if (chunk.usage != null) {
-        r1Prompt = chunk.usage!.promptTokens;
-        r1Completion = chunk.usage!.completionTokens;
-        final json = chunk.toJson();
-        final u = json['usage'] as Map<String, dynamic>?;
-        r1Creation = u?['cache_creation_input_tokens'] as int?;
-        r1Read = u?['cache_read_input_tokens'] as int?;
+      // Round 1 — should create cache
+      int? r1Creation, r1Read, r1Prompt, r1Completion;
+      await for (final chunk in client.chat.completions.createStream(request)) {
+        if (chunk.usage != null) {
+          r1Prompt = chunk.usage!.promptTokens;
+          r1Completion = chunk.usage!.completionTokens;
+          final json = chunk.toJson();
+          final u = json['usage'] as Map<String, dynamic>?;
+          r1Creation = u?['cache_creation_input_tokens'] as int?;
+          r1Read = u?['cache_read_input_tokens'] as int?;
+        }
       }
-    }
-    print('Round 1 (streaming): prompt=$r1Prompt, completion=$r1Completion, '
-        'cacheCreation=$r1Creation, cacheRead=$r1Read');
+      print(
+        'Round 1 (streaming): prompt=$r1Prompt, completion=$r1Completion, '
+        'cacheCreation=$r1Creation, cacheRead=$r1Read',
+      );
 
-    expect(r1Prompt, isNotNull);
-    expect(r1Prompt, greaterThan(0));
-    // First request: should have creation OR read (if cache warm from prior run)
-    final r1HasCache = (r1Creation ?? 0) > 0 || (r1Read ?? 0) > 0;
-    expect(r1HasCache, isTrue,
-        reason: 'Round 1 should report cache tokens. creation=$r1Creation, read=$r1Read');
+      expect(r1Prompt, isNotNull);
+      expect(r1Prompt, greaterThan(0));
+      // First request: should have creation OR read (if cache warm from prior run)
+      final r1HasCache = (r1Creation ?? 0) > 0 || (r1Read ?? 0) > 0;
+      expect(r1HasCache, isTrue, reason: 'Round 1 should report cache tokens. creation=$r1Creation, read=$r1Read');
 
-    // Round 2 — same request, should read from cache
-    int? r2Creation, r2Read, r2Prompt, r2Completion;
-    await for (final chunk in client.chat.completions.createStream(request)) {
-      if (chunk.usage != null) {
-        r2Prompt = chunk.usage!.promptTokens;
-        r2Completion = chunk.usage!.completionTokens;
-        final json = chunk.toJson();
-        final u = json['usage'] as Map<String, dynamic>?;
-        r2Creation = u?['cache_creation_input_tokens'] as int?;
-        r2Read = u?['cache_read_input_tokens'] as int?;
+      // Round 2 — same request, should read from cache
+      int? r2Creation, r2Read, r2Prompt, r2Completion;
+      await for (final chunk in client.chat.completions.createStream(request)) {
+        if (chunk.usage != null) {
+          r2Prompt = chunk.usage!.promptTokens;
+          r2Completion = chunk.usage!.completionTokens;
+          final json = chunk.toJson();
+          final u = json['usage'] as Map<String, dynamic>?;
+          r2Creation = u?['cache_creation_input_tokens'] as int?;
+          r2Read = u?['cache_read_input_tokens'] as int?;
+        }
       }
-    }
-    print('Round 2 (streaming): prompt=$r2Prompt, completion=$r2Completion, '
-        'cacheCreation=$r2Creation, cacheRead=$r2Read');
+      print(
+        'Round 2 (streaming): prompt=$r2Prompt, completion=$r2Completion, '
+        'cacheCreation=$r2Creation, cacheRead=$r2Read',
+      );
 
-    expect(r2Read, isNotNull, reason: 'Round 2 should have cache read tokens');
-    expect(r2Read, greaterThan(0), reason: 'Round 2 cacheRead must be > 0');
-    print('Cache read tokens: $r2Read (${((r2Read ?? 0) / (r2Prompt ?? 1) * 100).toStringAsFixed(1)}% of prompt)');
+      expect(r2Read, isNotNull, reason: 'Round 2 should have cache read tokens');
+      expect(r2Read, greaterThan(0), reason: 'Round 2 cacheRead must be > 0');
+      print('Cache read tokens: $r2Read (${((r2Read ?? 0) / (r2Prompt ?? 1) * 100).toStringAsFixed(1)}% of prompt)');
 
-    client.close();
-  }, skip: creds == null ? 'No credentials' : null,
-     timeout: Timeout(Duration(minutes: 3)));
+      client.close();
+    },
+    skip: creds == null ? 'No credentials' : null,
+    timeout: Timeout(Duration(minutes: 3)),
+  );
 
-  test('non-streaming: cache tokens reported via responseBodyTransformer', () async {
-    int? lastCreation, lastRead;
+  test(
+    'non-streaming: cache tokens reported via responseBodyTransformer',
+    () async {
+      int? lastCreation, lastRead;
 
-    final client = ClaudeCodeOpenAIClient(
-      credentials: creds,
-      responseBodyTransformer: (json) {
-        final u = json['usage'] as Map<String, dynamic>?;
-        lastCreation = u?['cache_creation_input_tokens'] as int?;
-        lastRead = u?['cache_read_input_tokens'] as int?;
-      },
-    );
-    final systemPrompt = _massiveSystemPrompt();
+      final client = ClaudeCodeOpenAIClient(
+        credentials: creds,
+        responseBodyTransformer: (json) {
+          final u = json['usage'] as Map<String, dynamic>?;
+          lastCreation = u?['cache_creation_input_tokens'] as int?;
+          lastRead = u?['cache_read_input_tokens'] as int?;
+        },
+      );
+      final systemPrompt = _massiveSystemPrompt();
 
-    final request = oai.ChatCompletionCreateRequest(
-      model: 'claude-sonnet-4-6',
-      messages: [
-        oai.ChatMessage.system(systemPrompt),
-        oai.ChatMessage.user('What is threshold_10_gamma? One number.'),
-      ],
-      maxCompletionTokens: 16000,
-    );
+      final request = oai.ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          oai.ChatMessage.system(systemPrompt),
+          oai.ChatMessage.user('What is threshold_10_gamma? One number.'),
+        ],
+        maxCompletionTokens: 16000,
+      );
 
-    // Round 1
-    final resp1 = await client.chat.completions.create(request);
-    print('Round 1 (non-streaming): prompt=${resp1.usage?.promptTokens}, '
+      // Round 1
+      final resp1 = await client.chat.completions.create(request);
+      print(
+        'Round 1 (non-streaming): prompt=${resp1.usage?.promptTokens}, '
         'cachedTokens=${resp1.usage?.promptTokensDetails?.cachedTokens}, '
-        'creation=$lastCreation, read=$lastRead');
+        'creation=$lastCreation, read=$lastRead',
+      );
 
-    // Round 2
-    final resp2 = await client.chat.completions.create(request);
-    print('Round 2 (non-streaming): prompt=${resp2.usage?.promptTokens}, '
+      // Round 2
+      final resp2 = await client.chat.completions.create(request);
+      print(
+        'Round 2 (non-streaming): prompt=${resp2.usage?.promptTokens}, '
         'cachedTokens=${resp2.usage?.promptTokensDetails?.cachedTokens}, '
-        'creation=$lastCreation, read=$lastRead');
+        'creation=$lastCreation, read=$lastRead',
+      );
 
-    // Round 2 should have cache hits
-    expect(resp2.usage?.promptTokensDetails?.cachedTokens, greaterThan(0),
-        reason: 'Second non-streaming request must have cachedTokens > 0');
+      // Round 2 should have cache hits
+      expect(
+        resp2.usage?.promptTokensDetails?.cachedTokens,
+        greaterThan(0),
+        reason: 'Second non-streaming request must have cachedTokens > 0',
+      );
 
-    client.close();
-  }, skip: creds == null ? 'No credentials' : null,
-     timeout: Timeout(Duration(minutes: 3)));
+      client.close();
+    },
+    skip: creds == null ? 'No credentials' : null,
+    timeout: Timeout(Duration(minutes: 3)),
+  );
 }

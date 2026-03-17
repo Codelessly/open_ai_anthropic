@@ -195,10 +195,7 @@ class MessageContentConverter {
     return switch (content) {
       UserTextContent(:final text) => anthropic.MessageContent.text(_sanitizeSurrogates(text)),
       UserPartsContent(:final parts) => () {
-        final blocks = parts
-            .map(_convertContentPart)
-            .whereType<anthropic.InputContentBlock>()
-            .toList();
+        final blocks = parts.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList();
         // If only images (no text blocks), prepend a placeholder (#22)
         final hasText = blocks.any((b) => b is anthropic.TextInputBlock);
         if (!hasText && blocks.isNotEmpty) {

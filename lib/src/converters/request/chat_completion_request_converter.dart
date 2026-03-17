@@ -13,8 +13,7 @@ import 'message_content_converter.dart';
 const String jsonSchemaToolName = '__json_response';
 
 /// The Claude Code identity system prompt required for OAuth Sonnet/Opus access.
-const String _claudeCodeIdentity =
-    "You are Claude Code, Anthropic's official CLI for Claude.";
+const String _claudeCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Converts OpenAI chat completion requests to Anthropic create message requests.
 class ChatCompletionRequestConverter {
@@ -59,9 +58,7 @@ class ChatCompletionRequestConverter {
 
     // Convert max tokens (required in Anthropic, optional in OpenAI)
     // Use higher default for OAuth (pi-mono uses modelMaxTokens/3 ≈ 21333)
-    final maxTokens = request.maxCompletionTokens ??
-        request.maxTokens ??
-        (isOAuth ? 16384 : 4096);
+    final maxTokens = request.maxCompletionTokens ?? request.maxTokens ?? (isOAuth ? 16384 : 4096);
 
     // Convert stop sequences
     final stopSequences = _convertStopSequences(request.stop);
@@ -101,9 +98,7 @@ class ChatCompletionRequestConverter {
     final cacheControl = cacheRetention == CacheRetention.none
         ? null
         : anthropic.CacheControlEphemeral(
-            ttl: cacheRetention == CacheRetention.long
-                ? anthropic.CacheTtl.ttl1h
-                : null,
+            ttl: cacheRetention == CacheRetention.long ? anthropic.CacheTtl.ttl1h : null,
           );
 
     anthropic.SystemPrompt? system;
@@ -121,23 +116,17 @@ class ChatCompletionRequestConverter {
       ];
       system = anthropic.SystemPrompt.blocks(blocks);
     } else {
-      system = systemPrompt != null
-          ? anthropic.SystemPrompt.text(systemPrompt)
-          : null;
+      system = systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null;
     }
 
     // Thinking configuration — adaptive for 4.6 models when OAuth
     final useAdaptiveThinking = isOAuth && _supportsAdaptiveThinking(model);
 
     // Temperature is incompatible with thinking — must not send both
-    final effectiveTemperature = useAdaptiveThinking
-        ? null
-        : request.temperature;
+    final effectiveTemperature = useAdaptiveThinking ? null : request.temperature;
 
     // Forward user as metadata.user_id (#21)
-    final metadata = request.user != null
-        ? anthropic.Metadata(userId: request.user)
-        : null;
+    final metadata = request.user != null ? anthropic.Metadata(userId: request.user) : null;
 
     var anthropicRequest = anthropic.MessageCreateRequest(
       model: model,
@@ -194,11 +183,9 @@ class ChatCompletionRequestConverter {
               modified = true;
             } else if (content is List && content.isNotEmpty) {
               final lastBlock = content.last;
-              if (lastBlock is Map &&
-                  !lastBlock.containsKey('cache_control')) {
+              if (lastBlock is Map && !lastBlock.containsKey('cache_control')) {
                 content[content.length - 1] = <String, dynamic>{
-                  for (final e in lastBlock.entries)
-                    e.key as String: e.value,
+                  for (final e in lastBlock.entries) e.key as String: e.value,
                   'cache_control': ccJson,
                 };
                 modified = true;

@@ -511,9 +511,13 @@ void main() {
 
         print('Streaming request ${i + 1} - creation: $creation, read: $read');
         final hasCache = (creation ?? 0) > 0 || (read ?? 0) > 0;
-        expect(hasCache, isTrue,
-            reason: 'Streaming request ${i + 1} should expose cache tokens in toJson. '
-                'creation: $creation, read: $read');
+        expect(
+          hasCache,
+          isTrue,
+          reason:
+              'Streaming request ${i + 1} should expose cache tokens in toJson. '
+              'creation: $creation, read: $read',
+        );
       }
 
       client.close();
@@ -568,9 +572,13 @@ void main() {
         print('responseBodyTransformer request ${i + 1} - creation: $capturedCreation, read: $capturedRead');
 
         final hasCache = (capturedCreation ?? 0) > 0 || (capturedRead ?? 0) > 0;
-        expect(hasCache, isTrue,
-            reason: 'responseBodyTransformer should receive cache tokens on request ${i + 1}. '
-                'creation: $capturedCreation, read: $capturedRead');
+        expect(
+          hasCache,
+          isTrue,
+          reason:
+              'responseBodyTransformer should receive cache tokens on request ${i + 1}. '
+              'creation: $capturedCreation, read: $capturedRead',
+        );
       }
 
       client.close();
