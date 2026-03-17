@@ -116,13 +116,18 @@ See the full 23-item diff below for items not yet implemented. Key ones:
 | 22 | Image-only content placeholder | Done |
 | 23 | Empty user message filtering | Done |
 
-### Remaining — Not Yet Implemented
+### Additionally Implemented
+
+| # | Item | Status |
+|---|------|--------|
+| 9 | Cache TTL for long retention (`ttl: "1h"`) | Done |
+| 15 | Conditional interleaved-thinking beta for 4.6 models | Done |
+| 19 | CacheRetention enum exported for API key clients | Done |
+
+### Remaining — Blocked on Upstream Format Changes
 
 | # | Item | Notes |
 |---|------|-------|
-| 9 | Cache TTL for long retention (`ttl: "1h"`) | Only matters for paid 1h caching |
-| 11 | Thinking blocks with missing/empty signatures → plain text | Requires thinking content in OpenAI message format |
-| 12 | Redacted thinking block passthrough | Requires thinking content in OpenAI message format |
-| 15 | Conditional interleaved-thinking beta header for 4.6 models | Deprecated header, works fine either way |
+| 11 | Thinking blocks with missing/empty signatures → plain text | Requires OpenAI message format to carry thinking metadata |
+| 12 | Redacted thinking block passthrough | Requires OpenAI message format to carry thinking metadata |
 | 17 | Errored/aborted assistant message skipping | OpenAI format doesn't carry stop reason on input messages |
-| 19 | API key client beta headers | Only affects non-OAuth clients |
