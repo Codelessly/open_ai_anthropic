@@ -196,7 +196,7 @@ void main() {
       );
     });
 
-    test('no bodyTransformer leaves request unchanged', () {
+    test('no bodyTransformer leaves request unchanged (non-OAuth)', () {
       final request = ChatCompletionCreateRequest(
         model: 'claude-sonnet-4-20250514',
         messages: [
@@ -209,6 +209,186 @@ void main() {
 
       // System is plain text, no cache control
       expect(result.system, isA<anthropic.TextSystemPrompt>());
+    });
+  });
+
+  group('OAuth mode (isOAuth)', () {
+    test('prepends Claude Code identity to system prompt', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('You are helpful.'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      expect(result.system, isA<anthropic.BlocksSystemPrompt>());
+      final blocks = (result.system! as anthropic.BlocksSystemPrompt).blocks;
+      expect(blocks.length, greaterThanOrEqualTo(2));
+      expect(blocks.first.text, contains('Claude Code'));
+      expect(blocks.last.text, 'You are helpful.');
+      // Both should have cache_control
+      for (final block in blocks) {
+        expect(block.cacheControl, isNotNull);
+      }
+    });
+
+    test('adds Claude Code identity even without user system prompt', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      expect(result.system, isA<anthropic.BlocksSystemPrompt>());
+      final blocks = (result.system! as anthropic.BlocksSystemPrompt).blocks;
+      expect(blocks, hasLength(1));
+      expect(blocks.first.text, contains('Claude Code'));
+    });
+
+    test('does NOT add Claude Code identity when isOAuth is false', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('You are helpful.'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(request, isOAuth: false);
+
+      expect(result.system, isA<anthropic.TextSystemPrompt>());
+    });
+
+    test('sets adaptive thinking for sonnet-4-6', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final json = result.toJson();
+      expect(json['thinking'], isNotNull);
+      expect((json['thinking'] as Map)['type'], 'adaptive');
+    });
+
+    test('sets adaptive thinking for opus-4-6', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-opus-4-6',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final json = result.toJson();
+      expect(json['thinking'], isNotNull);
+      expect((json['thinking'] as Map)['type'], 'adaptive');
+    });
+
+    test('does NOT set thinking for non-4.6 models', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final json = result.toJson();
+      expect(json.containsKey('thinking'), isFalse);
+    });
+
+    test('does NOT set thinking when isOAuth is false', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: false);
+      final json = result.toJson();
+      expect(json.containsKey('thinking'), isFalse);
+    });
+
+    test('strips temperature when thinking is active', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        temperature: 0.7,
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      expect(result.temperature, isNull);
+    });
+
+    test('keeps temperature for non-thinking models in OAuth', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [ChatMessage.user('Hello')],
+        temperature: 0.7,
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      expect(result.temperature, 0.7);
+    });
+
+    test('remaps tool names to CC canonical', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        tools: [
+          Tool.function(
+            name: 'bash',
+            description: 'Run command',
+            parameters: {'type': 'object', 'properties': {}},
+          ),
+          Tool.function(
+            name: 'my_custom_tool',
+            description: 'Custom',
+            parameters: {'type': 'object', 'properties': {}},
+          ),
+        ],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final tool0 = result.tools![0] as anthropic.CustomToolDefinition;
+      final tool1 = result.tools![1] as anthropic.CustomToolDefinition;
+      expect(tool0.tool.name, 'Bash'); // Remapped
+      expect(tool1.tool.name, 'my_custom_tool'); // Unknown, unchanged
+    });
+
+    test('applies cache_control to last user message', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.user('First'),
+          ChatMessage.assistant(content: 'Response'),
+          ChatMessage.user('Second'),
+        ],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final json = result.toJson();
+      final messages = json['messages'] as List;
+      // Find last user message
+      final lastUser = messages.lastWhere((m) => (m as Map)['role'] == 'user') as Map;
+      final content = lastUser['content'];
+      if (content is List && content.isNotEmpty) {
+        final lastBlock = content.last as Map;
+        expect(lastBlock.containsKey('cache_control'), isTrue);
+      } else if (content is String) {
+        fail('Last user message should have blocks format with cache_control');
+      }
+    });
+
+    test('uses higher default max_tokens', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        // No maxTokens set — should use a higher default
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      expect(result.maxTokens, greaterThan(4096));
     });
   });
 }

@@ -1,6 +1,8 @@
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
+import '../utils/claude_code_tools.dart';
+
 /// Maps tools and tool calls between OpenAI and Anthropic formats.
 class ToolMapper {
   /// Builds an [anthropic.InputSchema] from a raw JSON schema map.
@@ -22,14 +24,23 @@ class ToolMapper {
   }
 
   /// Converts OpenAI tools to Anthropic tool definitions.
-  List<anthropic.ToolDefinition>? toAnthropic(List<Tool>? tools) {
+  ///
+  /// When [isOAuth] is true, tool names are remapped to Claude Code canonical
+  /// casing (e.g. "bash" → "Bash", "read" → "Read").
+  List<anthropic.ToolDefinition>? toAnthropic(
+    List<Tool>? tools, {
+    bool isOAuth = false,
+  }) {
     if (tools == null || tools.isEmpty) return null;
 
     return tools.map((tool) {
       final function = tool.function;
+      final name = isOAuth
+          ? toClaudeCodeName(function.name)
+          : function.name;
       return anthropic.ToolDefinition.custom(
         anthropic.Tool(
-          name: function.name,
+          name: name,
           description: function.description,
           inputSchema: buildInputSchema(function.parameters),
         ),
@@ -64,7 +75,7 @@ class ToolMapper {
     bool? isError,
   }) {
     return anthropic.InputContentBlock.toolResult(
-      toolUseId: toolCallId,
+      toolUseId: normalizeToolCallId(toolCallId),
       content: [anthropic.ToolResultContent.text(content ?? '')],
       isError: isError,
     );

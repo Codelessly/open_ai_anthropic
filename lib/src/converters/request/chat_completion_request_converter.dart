@@ -11,6 +11,10 @@ import 'message_content_converter.dart';
 /// output conforms to the provided schema.
 const String jsonSchemaToolName = '__json_response';
 
+/// The Claude Code identity system prompt required for OAuth Sonnet/Opus access.
+const String _claudeCodeIdentity =
+    "You are Claude Code, Anthropic's official CLI for Claude.";
+
 /// Converts OpenAI chat completion requests to Anthropic create message requests.
 class ChatCompletionRequestConverter {
   final MessageContentConverter _messageConverter;
@@ -27,9 +31,17 @@ class ChatCompletionRequestConverter {
   /// If [bodyTransformer] is provided, the converted request is serialized to
   /// JSON, passed to the transformer for mutation (e.g. adding cache_control
   /// breakpoints), and then deserialized back to a typed request.
+  ///
+  /// If [isOAuth] is true, enables Claude Code compatibility:
+  /// - Prepends Claude Code identity system prompt
+  /// - Adds cache_control to system prompt blocks and last user message
+  /// - Enables adaptive thinking for 4.6 models
+  /// - Remaps tool names to Claude Code canonical casing
+  /// - Strips temperature when thinking is active (incompatible)
   anthropic.MessageCreateRequest convert(
     ChatCompletionCreateRequest request, {
     void Function(Map<String, dynamic> body)? bodyTransformer,
+    bool isOAuth = false,
   }) {
     // Log warnings for unsupported parameters
     _logUnsupportedParams(request);
@@ -44,13 +56,16 @@ class ChatCompletionRequestConverter {
     final model = request.model;
 
     // Convert max tokens (required in Anthropic, optional in OpenAI)
-    final maxTokens = request.maxCompletionTokens ?? request.maxTokens ?? 4096;
+    // Use higher default for OAuth (pi-mono uses modelMaxTokens/3 ≈ 21333)
+    final maxTokens = request.maxCompletionTokens ??
+        request.maxTokens ??
+        (isOAuth ? 16384 : 4096);
 
     // Convert stop sequences
     final stopSequences = _convertStopSequences(request.stop);
 
-    // Convert tools
-    var tools = _toolMapper.toAnthropic(request.tools);
+    // Convert tools — remap names to CC canonical for OAuth
+    var tools = _toolMapper.toAnthropic(request.tools, isOAuth: isOAuth);
 
     // Convert tool choice
     var toolChoice = _toolMapper.toAnthropicToolChoice(
@@ -59,8 +74,6 @@ class ChatCompletionRequestConverter {
     );
 
     // Convert responseFormat JSON schema to tool-based structured output.
-    // Anthropic doesn't have a native responseFormat; instead we create a
-    // tool with the schema and force the model to call it.
     final responseFormat = request.responseFormat;
     if (responseFormat is JsonSchemaResponseFormat) {
       if (toolChoice != null) {
@@ -81,12 +94,41 @@ class ChatCompletionRequestConverter {
       toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
     }
 
+    // Build system prompt — for OAuth, prepend Claude Code identity with cache_control
+    anthropic.SystemPrompt? system;
+    if (isOAuth) {
+      final blocks = <anthropic.SystemTextBlock>[
+        anthropic.SystemTextBlock(
+          text: _claudeCodeIdentity,
+          cacheControl: const anthropic.CacheControlEphemeral(),
+        ),
+        if (systemPrompt != null)
+          anthropic.SystemTextBlock(
+            text: systemPrompt,
+            cacheControl: const anthropic.CacheControlEphemeral(),
+          ),
+      ];
+      system = anthropic.SystemPrompt.blocks(blocks);
+    } else {
+      system = systemPrompt != null
+          ? anthropic.SystemPrompt.text(systemPrompt)
+          : null;
+    }
+
+    // Thinking configuration — adaptive for 4.6 models when OAuth
+    final useAdaptiveThinking = isOAuth && _supportsAdaptiveThinking(model);
+
+    // Temperature is incompatible with thinking — must not send both
+    final effectiveTemperature = useAdaptiveThinking
+        ? null
+        : request.temperature;
+
     var anthropicRequest = anthropic.MessageCreateRequest(
       model: model,
       messages: messages,
       maxTokens: maxTokens,
-      system: systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null,
-      temperature: request.temperature,
+      system: system,
+      temperature: effectiveTemperature,
       topP: request.topP,
       topK: request.topK,
       stopSequences: stopSequences,
@@ -103,7 +145,66 @@ class ChatCompletionRequestConverter {
       );
     }
 
+    // For OAuth without a bodyTransformer, auto-apply cache breakpoints
+    // and thinking via the JSON round-trip.
+    if (isOAuth) {
+      final body = anthropicRequest.toJson();
+      bool modified = false;
+
+      // Inject adaptive thinking for 4.6 models
+      if (useAdaptiveThinking && !body.containsKey('thinking')) {
+        body['thinking'] = {'type': 'adaptive'};
+        modified = true;
+      }
+
+      // Apply cache_control to last user message's last content block
+      final msgs = body['messages'];
+      if (msgs is List) {
+        for (int i = msgs.length - 1; i >= 0; i--) {
+          final msg = msgs[i];
+          if (msg is Map && msg['role'] == 'user') {
+            final content = msg['content'];
+            if (content is String) {
+              msg['content'] = [
+                {
+                  'type': 'text',
+                  'text': content,
+                  'cache_control': {'type': 'ephemeral'},
+                },
+              ];
+              modified = true;
+            } else if (content is List && content.isNotEmpty) {
+              final lastBlock = content.last;
+              if (lastBlock is Map &&
+                  !lastBlock.containsKey('cache_control')) {
+                content[content.length - 1] = {
+                  ...lastBlock,
+                  'cache_control': {'type': 'ephemeral'},
+                };
+                modified = true;
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      if (modified) {
+        anthropicRequest = anthropic.MessageCreateRequest.fromJson(
+          _deepCastJson(body),
+        );
+      }
+    }
+
     return anthropicRequest;
+  }
+
+  /// Whether a model supports adaptive thinking (Opus 4.6 and Sonnet 4.6).
+  static bool _supportsAdaptiveThinking(String modelId) {
+    return modelId.contains('opus-4-6') ||
+        modelId.contains('opus-4.6') ||
+        modelId.contains('sonnet-4-6') ||
+        modelId.contains('sonnet-4.6');
   }
 
   /// Converts OpenAI stop sequences to Anthropic format.
@@ -114,10 +215,6 @@ class ChatCompletionRequestConverter {
 
   /// Recursively casts all nested [Map] and [List] values to
   /// `Map<String, dynamic>` and `List<dynamic>` respectively.
-  ///
-  /// Body transformers may produce `_Map<dynamic, dynamic>` via spread
-  /// operators or map literals, which `fromJson()` rejects with type cast
-  /// errors. This ensures the entire tree is properly typed.
   static Map<String, dynamic> _deepCastJson(Map body) {
     return body.map((key, value) => MapEntry(key as String, _deepCastValue(value)));
   }
@@ -130,64 +227,22 @@ class ChatCompletionRequestConverter {
 
   /// Logs warnings for unsupported parameters.
   void _logUnsupportedParams(ChatCompletionCreateRequest request) {
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'frequency_penalty',
-      request.frequencyPenalty,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'presence_penalty',
-      request.presencePenalty,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'logit_bias',
-      request.logitBias,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'logprobs',
-      request.logprobs,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'top_logprobs',
-      request.topLogprobs,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'seed',
-      request.seed,
-    );
-    // Only log response_format as unsupported when it's NOT jsonSchema
-    // (jsonSchema is handled via tool-based structured output).
+    AnthropicOpenAILogger.logUnsupportedParam('frequency_penalty', request.frequencyPenalty);
+    AnthropicOpenAILogger.logUnsupportedParam('presence_penalty', request.presencePenalty);
+    AnthropicOpenAILogger.logUnsupportedParam('logit_bias', request.logitBias);
+    AnthropicOpenAILogger.logUnsupportedParam('logprobs', request.logprobs);
+    AnthropicOpenAILogger.logUnsupportedParam('top_logprobs', request.topLogprobs);
+    AnthropicOpenAILogger.logUnsupportedParam('seed', request.seed);
     if (request.responseFormat != null && request.responseFormat is! JsonSchemaResponseFormat) {
-      AnthropicOpenAILogger.logUnsupportedParam(
-        'response_format',
-        request.responseFormat,
-      );
+      AnthropicOpenAILogger.logUnsupportedParam('response_format', request.responseFormat);
     }
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'audio',
-      request.audio,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'modalities',
-      request.modalities,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'prediction',
-      request.prediction,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'user',
-      request.user,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'store',
-      request.store,
-    );
-    AnthropicOpenAILogger.logUnsupportedParam(
-      'metadata',
-      request.metadata,
-    );
+    AnthropicOpenAILogger.logUnsupportedParam('audio', request.audio);
+    AnthropicOpenAILogger.logUnsupportedParam('modalities', request.modalities);
+    AnthropicOpenAILogger.logUnsupportedParam('prediction', request.prediction);
+    AnthropicOpenAILogger.logUnsupportedParam('user', request.user);
+    AnthropicOpenAILogger.logUnsupportedParam('store', request.store);
+    AnthropicOpenAILogger.logUnsupportedParam('metadata', request.metadata);
 
-    // Log warning if n > 1
     if (request.n != null && request.n! > 1) {
       AnthropicOpenAILogger.warn(
         'Parameter "n" > 1 is not supported by Anthropic. Only 1 choice will be returned.',

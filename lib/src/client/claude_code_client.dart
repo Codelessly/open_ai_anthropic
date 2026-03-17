@@ -52,7 +52,7 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     this.debugLogNetworkRequests = false,
   }) : assert(credentials != null || tokenStore != null, 'Either credentials or tokenStore must be provided.'),
        _tokenStore = tokenStore ?? ClaudeCodeTokenStore(credentials!, onTokenRefreshedCallback: onTokenRefreshed),
-       super(apiKey: '');
+       super(apiKey: '', isOAuth: true);
 
   @override
   anthropic.AnthropicClient buildAnthropicClient() => AnthropicAuthenticatedClient(
@@ -98,6 +98,7 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
        );
 
   /// Injects the necessary authentication headers into the request.
+  /// Matches pi-mono's OAuth client construction for Claude Code compatibility.
   static Future<Map<String, String>> _injectHeaders(
     ClaudeCodeTokenStore tokenStore,
     Map<String, String> headers,
@@ -106,9 +107,12 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
         ...headers,
         'Authorization': 'Bearer ${await tokenStore.getAccessToken()}',
         'anthropic-beta': ClaudeCodeOpenAIClient.anthropicBeta,
+        'user-agent': 'claude-cli/2.1.75',
+        'x-app': 'cli',
+        'accept': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
       }
       // Critical: ensure 'x-api-key' is not sent, as it will cause authentication to fail.
-      // We use OAuth tokens instead of API keys for authentication.
       ..remove('x-api-key');
   }
 }

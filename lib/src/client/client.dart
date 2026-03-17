@@ -47,6 +47,10 @@ class AnthropicOpenAIClient extends OpenAIClient {
   final Map<String, dynamic> _queryParams;
   final int _retries;
 
+  /// Whether this client uses OAuth authentication (Claude Code mode).
+  /// When true, enables Claude Code compatibility in request conversion.
+  final bool isOAuth;
+
   /// Optional callback to mutate the Anthropic request body before sending.
   final BodyTransformer? bodyTransformer;
 
@@ -90,6 +94,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     Map<String, dynamic> queryParams = const {},
     int retries = 3,
     http.Client? client,
+    this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
   }) : _apiKey = apiKey,
@@ -137,6 +142,7 @@ class AnthropicOpenAIClient extends OpenAIClient {
     anthropicClient: _anthropicClient,
     requestConverter: _requestConverter,
     responseConverter: _responseConverter,
+    isOAuth: isOAuth,
     bodyTransformer: bodyTransformer,
     responseBodyTransformer: responseBodyTransformer,
     // These base resource fields are required by the parent class but unused
@@ -247,6 +253,7 @@ class _AnthropicChatResource extends ChatResource {
   final anthropic.AnthropicClient anthropicClient;
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
+  final bool isOAuth;
   final BodyTransformer? bodyTransformer;
   final BodyTransformer? responseBodyTransformer;
 
@@ -254,6 +261,7 @@ class _AnthropicChatResource extends ChatResource {
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
     required super.config,
@@ -269,6 +277,7 @@ class _AnthropicChatResource extends ChatResource {
     anthropicClient: anthropicClient,
     requestConverter: requestConverter,
     responseConverter: responseConverter,
+    isOAuth: isOAuth,
     bodyTransformer: bodyTransformer,
     responseBodyTransformer: responseBodyTransformer,
     config: config,
@@ -282,6 +291,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   final anthropic.AnthropicClient anthropicClient;
   final ChatCompletionRequestConverter requestConverter;
   final ChatCompletionResponseConverter responseConverter;
+  final bool isOAuth;
   final BodyTransformer? bodyTransformer;
   final BodyTransformer? responseBodyTransformer;
 
@@ -289,6 +299,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
     required super.config,
@@ -303,7 +314,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) async {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer);
+    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
     final converted = responseConverter.convert(anthropicResponse, requestModel);
 
@@ -325,7 +336,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer);
+    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
     final transformer = StreamEventTransformer(requestModel: requestModel);
     return anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
   }
