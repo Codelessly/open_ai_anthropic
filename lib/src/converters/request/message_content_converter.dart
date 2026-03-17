@@ -4,6 +4,7 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/tool_mapper.dart';
+import '../../utils/claude_code_tools.dart';
 import '../../utils/logger.dart';
 
 /// Converts OpenAI message content to Anthropic message format.
@@ -37,11 +38,18 @@ class MessageContentConverter {
   /// Converts OpenAI messages to Anthropic input messages.
   ///
   /// Filters out system/developer messages (handled separately as system prompt).
+  /// Inserts synthetic error tool results for orphaned tool calls (#16).
+  /// Filters empty user messages (#23).
+  /// Normalizes tool call IDs for cross-provider compatibility (#10).
   List<anthropic.InputMessage> convertMessages(List<ChatMessage> messages) {
     final result = <anthropic.InputMessage>[];
 
     // Group tool messages that follow an assistant message with tool calls
     final pendingToolResults = <String, String>{};
+
+    // Track tool call IDs from the last assistant message that had tool calls,
+    // so we can detect orphaned calls.
+    var pendingToolCallIds = <String>{};
 
     for (int i = 0; i < messages.length; i++) {
       final message = messages[i];
@@ -55,22 +63,57 @@ class MessageContentConverter {
         case UserMessage():
           // If there are pending tool results, send them first as a user message
           if (pendingToolResults.isNotEmpty) {
+            // Insert synthetic error results for any orphaned tool calls
+            _insertSyntheticResults(pendingToolCallIds, pendingToolResults);
             result.add(_createToolResultMessage(pendingToolResults));
             pendingToolResults.clear();
+            pendingToolCallIds.clear();
+          } else if (pendingToolCallIds.isNotEmpty) {
+            // Assistant had tool calls but no tool results at all — all orphaned
+            final syntheticResults = <String, String>{};
+            _insertSyntheticResults(pendingToolCallIds, syntheticResults);
+            if (syntheticResults.isNotEmpty) {
+              result.add(_createToolResultMessage(syntheticResults));
+            }
+            pendingToolCallIds.clear();
+          }
+
+          // Skip empty user messages (#23)
+          final userContent = message.content;
+          if (userContent is UserTextContent && userContent.text.trim().isEmpty) {
+            break;
           }
 
           result.add(
             anthropic.InputMessage(
               role: anthropic.MessageRole.user,
-              content: _convertUserContent(message.content),
+              content: _convertUserContent(userContent),
             ),
           );
 
         case AssistantMessage():
           // If there are pending tool results, send them first
           if (pendingToolResults.isNotEmpty) {
+            _insertSyntheticResults(pendingToolCallIds, pendingToolResults);
             result.add(_createToolResultMessage(pendingToolResults));
             pendingToolResults.clear();
+            pendingToolCallIds.clear();
+          } else if (pendingToolCallIds.isNotEmpty) {
+            // Previous assistant's tool calls were all orphaned
+            final syntheticResults = <String, String>{};
+            _insertSyntheticResults(pendingToolCallIds, syntheticResults);
+            if (syntheticResults.isNotEmpty) {
+              result.add(_createToolResultMessage(syntheticResults));
+            }
+            pendingToolCallIds.clear();
+          }
+
+          // Track tool call IDs from this assistant message
+          pendingToolCallIds = {};
+          if (message.toolCalls != null) {
+            for (final tc in message.toolCalls!) {
+              pendingToolCallIds.add(tc.id);
+            }
           }
 
           result.add(
@@ -86,9 +129,17 @@ class MessageContentConverter {
       }
     }
 
-    // Send any remaining tool results
+    // Send any remaining tool results (with synthetic results for orphans)
     if (pendingToolResults.isNotEmpty) {
+      _insertSyntheticResults(pendingToolCallIds, pendingToolResults);
       result.add(_createToolResultMessage(pendingToolResults));
+    } else if (pendingToolCallIds.isNotEmpty) {
+      // End of messages with orphaned tool calls
+      final syntheticResults = <String, String>{};
+      _insertSyntheticResults(pendingToolCallIds, syntheticResults);
+      if (syntheticResults.isNotEmpty) {
+        result.add(_createToolResultMessage(syntheticResults));
+      }
     }
 
     // Validate that we have at least one message
@@ -102,12 +153,26 @@ class MessageContentConverter {
     return result;
   }
 
+  /// Inserts synthetic error tool results for any tool call IDs that don't
+  /// already have a result in [results].
+  void _insertSyntheticResults(
+    Set<String> toolCallIds,
+    Map<String, String> results,
+  ) {
+    for (final id in toolCallIds) {
+      if (!results.containsKey(id)) {
+        results[id] = 'No result provided';
+      }
+    }
+  }
+
   /// Creates an Anthropic user message containing tool results.
   anthropic.InputMessage _createToolResultMessage(
     Map<String, String> results,
   ) {
     final blocks = results.entries.map((entry) {
-      return _toolMapper.toToolResultBlock(entry.key, entry.value);
+      final isError = entry.value == 'No result provided';
+      return _toolMapper.toToolResultBlock(entry.key, entry.value, isError: isError ? true : null);
     }).toList();
 
     return anthropic.InputMessage(
@@ -141,13 +206,6 @@ class MessageContentConverter {
   }
 
   /// Converts a binary content part to the appropriate Anthropic block.
-  ///
-  /// In the OpenAI spec, `ContentPart.imageUrl()` carries all binary content
-  /// via data URIs. Dart's built-in [UriData] parses the MIME type, which
-  /// determines the Anthropic block type:
-  /// - `image/*` → [anthropic.InputContentBlock.image]
-  /// - `application/pdf` → [anthropic.InputContentBlock.document]
-  /// - Plain URLs → forwarded as-is (Anthropic resolves the type server-side)
   anthropic.InputContentBlock _convertImagePart(String url) {
     final uri = Uri.tryParse(url);
     final dataUri = uri?.data;
@@ -186,17 +244,17 @@ class MessageContentConverter {
   anthropic.MessageContent _convertAssistantContent(AssistantMessage msg) {
     final blocks = <anthropic.InputContentBlock>[];
 
-    // Add text content if present
-    if (msg.content != null && msg.content!.isNotEmpty) {
+    // Add text content if present and non-empty (#13)
+    if (msg.content != null && msg.content!.trim().isNotEmpty) {
       blocks.add(anthropic.InputContentBlock.text(msg.content!));
     }
 
-    // Add tool calls as tool_use blocks
+    // Add tool calls as tool_use blocks with normalized IDs (#10)
     if (msg.toolCalls != null) {
       for (final toolCall in msg.toolCalls!) {
         blocks.add(
           anthropic.InputContentBlock.toolUse(
-            id: toolCall.id,
+            id: normalizeToolCallId(toolCall.id),
             name: toolCall.function.name,
             input: _parseToolArguments(toolCall.function.arguments),
           ),
@@ -228,13 +286,11 @@ class MessageContentConverter {
       if (parsed is Map<String, dynamic>) {
         return parsed;
       }
-      // Non-object JSON value, wrap in a 'value' key
       AnthropicOpenAILogger.warn(
         'Tool arguments is not a JSON object, wrapping in "value" key',
       );
       return {'value': parsed};
     } catch (e) {
-      // If JSON parsing fails, return as a single string value
       AnthropicOpenAILogger.warn(
         'Failed to parse tool arguments as JSON: $e. '
         'Wrapping raw string in "value" key.',
