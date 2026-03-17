@@ -182,12 +182,22 @@ class MessageContentConverter {
   }
 
   /// Converts OpenAI user message content to Anthropic format.
+  /// If parts content has only images (no text), prepends a placeholder (#22).
   anthropic.MessageContent _convertUserContent(UserMessageContent content) {
     return switch (content) {
       UserTextContent(:final text) => anthropic.MessageContent.text(text),
-      UserPartsContent(:final parts) => anthropic.MessageContent.blocks(
-        parts.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList(),
-      ),
+      UserPartsContent(:final parts) => () {
+        final blocks = parts
+            .map(_convertContentPart)
+            .whereType<anthropic.InputContentBlock>()
+            .toList();
+        // If only images (no text blocks), prepend a placeholder (#22)
+        final hasText = blocks.any((b) => b is anthropic.TextInputBlock);
+        if (!hasText && blocks.isNotEmpty) {
+          blocks.insert(0, anthropic.InputContentBlock.text('(see attached image)'));
+        }
+        return anthropic.MessageContent.blocks(blocks);
+      }(),
     };
   }
 

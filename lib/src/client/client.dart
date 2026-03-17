@@ -316,7 +316,15 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
-    final converted = responseConverter.convert(anthropicResponse, requestModel);
+    final originalToolNames = isOAuth
+        ? request.tools?.map((t) => t.function.name).toList()
+        : null;
+    final converted = responseConverter.convert(
+      anthropicResponse,
+      requestModel,
+      isOAuth: isOAuth,
+      originalToolNames: originalToolNames,
+    );
 
     if (responseBodyTransformer != null) {
       try {

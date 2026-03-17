@@ -4,6 +4,7 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 
 import '../../mappers/stop_reason_mapper.dart';
+import '../../utils/claude_code_tools.dart';
 import '../request/chat_completion_request_converter.dart' show jsonSchemaToolName;
 
 /// Result of converting an Anthropic response to OpenAI format.
@@ -51,8 +52,10 @@ class ChatCompletionResponseConverter {
   /// Anthropic-specific cache token metadata.
   ConvertedChatCompletion convert(
     anthropic.Message anthropicMessage,
-    String requestModel,
-  ) {
+    String requestModel, {
+    bool isOAuth = false,
+    List<String>? originalToolNames,
+  }) {
     // Check if the response contains a JSON schema tool call (structured output).
     final jsonSchemaToolUse = anthropicMessage.toolUseBlocks.where((b) => b.name == jsonSchemaToolName).firstOrNull;
 
@@ -66,7 +69,11 @@ class ChatCompletionResponseConverter {
     }
 
     // Extract real tool calls (excluding the JSON schema tool).
-    final toolCalls = _extractToolCalls(anthropicMessage);
+    final toolCalls = _extractToolCalls(
+      anthropicMessage,
+      isOAuth: isOAuth,
+      originalToolNames: originalToolNames,
+    );
 
     // When JSON schema tool was used, the stop reason is "tool_use" but from
     // the caller's perspective this is a normal text response → map to "stop".
@@ -100,7 +107,11 @@ class ChatCompletionResponseConverter {
 
   /// Extracts tool calls from Anthropic response content blocks,
   /// excluding the internal [jsonSchemaToolName] tool.
-  List<ToolCall>? _extractToolCalls(anthropic.Message message) {
+  List<ToolCall>? _extractToolCalls(
+    anthropic.Message message, {
+    bool isOAuth = false,
+    List<String>? originalToolNames,
+  }) {
     final toolCalls = message.toolUseBlocks
         .where((toolUse) => toolUse.name != jsonSchemaToolName)
         .map(
@@ -108,7 +119,9 @@ class ChatCompletionResponseConverter {
             id: toolUse.id,
             type: 'function',
             function: FunctionCall(
-              name: toolUse.name,
+              name: isOAuth
+                  ? fromClaudeCodeName(toolUse.name, originalToolNames)
+                  : toolUse.name,
               arguments: jsonEncode(toolUse.input),
             ),
           ),

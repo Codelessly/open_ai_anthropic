@@ -123,6 +123,11 @@ class ChatCompletionRequestConverter {
         ? null
         : request.temperature;
 
+    // Forward user as metadata.user_id (#21)
+    final metadata = request.user != null
+        ? anthropic.Metadata(userId: request.user)
+        : null;
+
     var anthropicRequest = anthropic.MessageCreateRequest(
       model: model,
       messages: messages,
@@ -134,6 +139,7 @@ class ChatCompletionRequestConverter {
       stopSequences: stopSequences,
       tools: tools,
       toolChoice: toolChoice,
+      metadata: metadata,
     );
 
     // Apply body transformer if provided (e.g. for cache breakpoints).
@@ -240,7 +246,7 @@ class ChatCompletionRequestConverter {
     AnthropicOpenAILogger.logUnsupportedParam('audio', request.audio);
     AnthropicOpenAILogger.logUnsupportedParam('modalities', request.modalities);
     AnthropicOpenAILogger.logUnsupportedParam('prediction', request.prediction);
-    AnthropicOpenAILogger.logUnsupportedParam('user', request.user);
+    // 'user' is forwarded as metadata.user_id, not logged as unsupported.
     AnthropicOpenAILogger.logUnsupportedParam('store', request.store);
     AnthropicOpenAILogger.logUnsupportedParam('metadata', request.metadata);
 

@@ -2,7 +2,9 @@ import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:openai_dart/openai_dart.dart';
 import 'package:test/test.dart';
 
+import 'package:open_ai_anthropic/src/converters/request/chat_completion_request_converter.dart';
 import 'package:open_ai_anthropic/src/converters/request/message_content_converter.dart';
+import 'package:open_ai_anthropic/src/converters/response/chat_completion_response_converter.dart';
 
 void main() {
   late MessageContentConverter converter;
@@ -198,6 +200,149 @@ void main() {
               reason: 'Tool result ID should also be normalized');
         default:
           fail('Expected blocks content with tool_result');
+      }
+    });
+  });
+
+  // =========================================================================
+  // #20 — Reverse tool name remapping in responses
+  // =========================================================================
+  group('reverse tool name remapping (#20)', () {
+    test('response converter remaps CC tool names back to original', () {
+      final responseConverter = ChatCompletionResponseConverter();
+
+      // Simulate Anthropic returning CC-canonical tool name "Bash"
+      // when the original tool was "bash"
+      final message = anthropic.Message(
+        id: 'msg_1',
+        type: 'message',
+        role: anthropic.MessageRole.assistant,
+        content: [
+          anthropic.ToolUseBlock(
+            id: 'toolu_1',
+            name: 'Bash', // CC canonical name
+            input: {'command': 'ls'},
+          ),
+        ],
+        model: 'claude-sonnet-4-6',
+        stopReason: anthropic.StopReason.toolUse,
+        usage: anthropic.Usage(inputTokens: 10, outputTokens: 5),
+      );
+
+      final result = responseConverter.convert(
+        message,
+        'claude-sonnet-4-6',
+        isOAuth: true,
+        originalToolNames: ['bash', 'read_files'],
+      );
+
+      final toolCalls = result.completion.choices.first.message.toolCalls;
+      expect(toolCalls, isNotNull);
+      expect(toolCalls!.first.function.name, 'bash',
+          reason: 'Should remap CC name "Bash" back to original "bash"');
+    });
+
+    test('response converter passes through non-CC tool names unchanged', () {
+      final responseConverter = ChatCompletionResponseConverter();
+
+      final message = anthropic.Message(
+        id: 'msg_2',
+        type: 'message',
+        role: anthropic.MessageRole.assistant,
+        content: [
+          anthropic.ToolUseBlock(
+            id: 'toolu_2',
+            name: 'lookup_capital', // Not a CC tool name
+            input: {'country': 'France'},
+          ),
+        ],
+        model: 'claude-sonnet-4-6',
+        stopReason: anthropic.StopReason.toolUse,
+        usage: anthropic.Usage(inputTokens: 10, outputTokens: 5),
+      );
+
+      final result = responseConverter.convert(
+        message,
+        'claude-sonnet-4-6',
+        isOAuth: true,
+        originalToolNames: ['lookup_capital'],
+      );
+
+      final toolCalls = result.completion.choices.first.message.toolCalls;
+      expect(toolCalls!.first.function.name, 'lookup_capital');
+    });
+  });
+
+  // =========================================================================
+  // #21 — Metadata user_id forwarding
+  // =========================================================================
+  group('metadata user_id forwarding (#21)', () {
+    test('forwards metadata user_id to Anthropic request', () {
+      final requestConverter = ChatCompletionRequestConverter();
+
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        user: 'user-123',
+      );
+
+      final result = requestConverter.convert(request, isOAuth: true);
+      final json = result.toJson();
+
+      expect(json['metadata'], isNotNull,
+          reason: 'Should forward user as metadata.user_id');
+      expect((json['metadata'] as Map)['user_id'], 'user-123');
+    });
+  });
+
+  // =========================================================================
+  // #22 — Image-only content gets text placeholder
+  // =========================================================================
+  group('image-only content placeholder (#22)', () {
+    test('prepends text placeholder when user message has only images', () {
+      final messages = <ChatMessage>[
+        ChatMessage.user(
+          UserMessageContent.parts([
+            ContentPart.imageUrl('https://example.com/image.png'),
+          ]),
+        ),
+      ];
+
+      final result = converter.convertMessages(messages);
+
+      final userMsg = result.first;
+      switch (userMsg.content) {
+        case anthropic.BlocksMessageContent(:final blocks):
+          // Should have a text block prepended before the image
+          final hasText = blocks.any((b) => b is anthropic.TextInputBlock);
+          expect(hasText, isTrue,
+              reason: 'Image-only content should have a text placeholder prepended');
+        default:
+          fail('Expected BlocksMessageContent');
+      }
+    });
+
+    test('does NOT prepend placeholder when user message has text and images', () {
+      final messages = <ChatMessage>[
+        ChatMessage.user(
+          UserMessageContent.parts([
+            ContentPart.text('Look at this'),
+            ContentPart.imageUrl('https://example.com/image.png'),
+          ]),
+        ),
+      ];
+
+      final result = converter.convertMessages(messages);
+
+      final userMsg = result.first;
+      switch (userMsg.content) {
+        case anthropic.BlocksMessageContent(:final blocks):
+          final textBlocks = blocks.whereType<anthropic.TextInputBlock>().toList();
+          expect(textBlocks.length, 1,
+              reason: 'Should not add extra placeholder when text already exists');
+          expect(textBlocks.first.text, 'Look at this');
+        default:
+          fail('Expected BlocksMessageContent');
       }
     });
   });
