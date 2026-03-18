@@ -142,45 +142,65 @@ class ClaudeCodeTokenStore {
 
   @mustCallSuper
   Future<String> getAccessToken() async {
-    if (_credentials.isExpired) {
-      final newCredentials = await refresh();
-      await onTokenRefreshed(newCredentials);
-      return newCredentials.accessToken;
-    }
-    return _credentials.accessToken;
+    return switch (_credentials) {
+      ShortLivedClaudeCodeCredentials creds when creds.isExpired => (await refresh()).accessToken,
+      LongLivedClaudeCodeCredentials creds when creds.isExpired => throw StateError(
+        'Long-lived credentials have expired and cannot be refreshed.',
+      ),
+      _ => _credentials.accessToken,
+    };
   }
 
-  /// Refresh access token using refresh token
+  /// Refresh access token using refresh token.
+  /// Only works with [ShortLivedClaudeCodeCredentials]. Throws if called
+  /// on [LongLivedClaudeCodeCredentials].
+  ///
+  /// Replicates pi-mono's `refreshAnthropicToken` verbatim:
+  /// - POST to TOKEN_URL with only { grant_type, client_id, refresh_token }.
+  /// - Headers: only Content-Type + Accept (no browser-like headers).
+  /// - Scope is explicitly omitted from refresh requests.
+  /// - Expiry: subtracts 5-minute safety buffer from expires_in.
+  /// Source: https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/utils/oauth/anthropic.ts
   Future<ClaudeCodeCredentials> refresh() async {
+    if (_credentials is! ShortLivedClaudeCodeCredentials) {
+      throw StateError(
+        'Cannot refresh long-lived credentials. '
+        'Only ShortLivedClaudeCodeCredentials support token refresh.',
+      );
+    }
+    final shortLived = _credentials as ShortLivedClaudeCodeCredentials;
+
+    const tokenUrl = 'https://platform.claude.com/v1/oauth/token';
     final response = await _client.post(
-      Uri.parse('https://console.anthropic.com/v1/oauth/token'),
+      Uri.parse(tokenUrl),
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://claude.ai/',
-        'Origin': 'https://claude.ai',
+        'Accept': 'application/json',
       },
       body: jsonEncode({
         'grant_type': 'refresh_token',
         'client_id': '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-        'refresh_token': _credentials.refreshToken,
+        'refresh_token': shortLived.refreshToken,
       }),
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Token refresh failed: ${response.body}');
+      throw Exception(
+        'Token refresh failed. status=${response.statusCode}; '
+        'url=$tokenUrl; body=${response.body}',
+      );
     }
 
     final Map<String, dynamic> tokens = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
     tokens['expires_at'] = DateTime.timestamp().add(Duration(seconds: tokens['expires_in'])).millisecondsSinceEpoch;
-    return ClaudeCodeCredentials.fromJson(tokens);
+    final newCredentials = ClaudeCodeCredentials.fromJson(tokens);
+    await onTokenRefreshed(newCredentials);
+    return newCredentials;
   }
 
   @mustCallSuper
   Future<void> onTokenRefreshed(ClaudeCodeCredentials newCredentials) async {
+    onTokenRefreshedCallback?.call(newCredentials);
     _credentials = newCredentials;
   }
 }
@@ -284,7 +304,7 @@ class FileClaudeCodeTokenStore extends ClaudeCodeTokenStore {
     try {
       await file.writeAsString(json);
     } catch (error, stackTrace) {
-      log('⚠️ Failed to save refreshed tokens to file: $error\n$stackTrace');
+      log('Failed to save refreshed tokens to file', stackTrace: stackTrace, error: error);
     }
   }
 }

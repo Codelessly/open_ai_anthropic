@@ -55,18 +55,35 @@ await for (final chunk in stream) {
 For OAuth-based authentication (e.g. Claude Code tokens):
 
 ```dart
-// From credentials JSON
+// From credentials JSON (auto-detects short-lived vs long-lived)
 final credentialsJson = Platform.environment['CLAUDE_CODE_CREDENTIALS'];
 final credentials = ClaudeCodeCredentials.fromJsonString(credentialsJson!);
 final client = ClaudeCodeOpenAIClient(credentials: credentials);
 
-// Or from a long-lived access token (via `claude setup-token`)
-final token = Platform.environment['CLAUDE_CODE_TOKEN'];
-final credentials = ClaudeCodeCredentials.fromToken(token!);
-final client = ClaudeCodeOpenAIClient(credentials: credentials);
+// Short-lived OAuth credentials (with refresh token, ~8 hour expiry)
+final credentials = ShortLivedClaudeCodeCredentials(
+  accessToken: 'oauth-access-token',
+  refreshToken: 'oauth-refresh-token',
+  expiresAt: DateTime.now().add(Duration(hours: 8)),
+);
+
+// Long-lived API key credentials (via `claude setup-token`, ~360 day expiry)
+final credentials = LongLivedClaudeCodeCredentials(
+  accessToken: 'sk-ant-...',
+  expiresAt: DateTime.now().add(Duration(days: 360)),
+);
 ```
 
-You can also pass a `ClaudeCodeTokenStore` instead of `credentials` for custom token storage and refresh logic.
+#### Credential Types
+
+`ClaudeCodeCredentials` is a sealed class with two subtypes:
+
+- **`ShortLivedClaudeCodeCredentials`** — OAuth tokens with a refresh token. Expire in ~8 hours and can be auto-refreshed by the token store. `isExpired` includes a 5-minute proactive buffer.
+- **`LongLivedClaudeCodeCredentials`** — API keys generated via `claude setup-token`. Valid for ~360 days, no refresh token, no expiration buffer.
+
+The `fromJson` and `fromJsonString` factories on the sealed class auto-detect the subtype based on the presence of a non-empty `refresh_token` field.
+
+You can also pass a `ClaudeCodeTokenStore` instead of `credentials` for custom token storage and refresh logic. The token store auto-refreshes short-lived credentials and throws `StateError` for expired long-lived credentials.
 
 ### Generating OAuth Credentials
 
