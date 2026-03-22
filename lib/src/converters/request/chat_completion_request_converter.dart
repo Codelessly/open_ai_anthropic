@@ -72,6 +72,10 @@ class ChatCompletionRequestConverter {
       request.parallelToolCalls,
     );
 
+    // Thinking configuration — adaptive for 4.6 models when OAuth.
+    // Computed early so JSON schema tool choice can respect thinking constraints.
+    final useAdaptiveThinking = isOAuth && _supportsAdaptiveThinking(model);
+
     // Convert responseFormat JSON schema to tool-based structured output.
     final responseFormat = request.responseFormat;
     if (responseFormat is JsonSchemaResponseFormat) {
@@ -90,7 +94,13 @@ class ChatCompletionRequestConverter {
         ),
       );
       tools = [...?tools, jsonTool];
-      toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
+      // Forced tool choice (tool_choice: {type: "tool", name: "..."}) is
+      // incompatible with extended thinking. When thinking will be active,
+      // use "any" instead — it still forces tool use but lets the model
+      // choose which tool, avoiding the API conflict.
+      toolChoice = useAdaptiveThinking
+          ? anthropic.ToolChoice.any()
+          : anthropic.ToolChoice.tool(jsonSchemaToolName);
     }
 
     // Build system prompt — for OAuth, prepend Claude Code identity with cache_control
@@ -118,9 +128,6 @@ class ChatCompletionRequestConverter {
     } else {
       system = systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null;
     }
-
-    // Thinking configuration — adaptive for 4.6 models when OAuth
-    final useAdaptiveThinking = isOAuth && _supportsAdaptiveThinking(model);
 
     // Temperature is incompatible with thinking — must not send both
     final effectiveTemperature = useAdaptiveThinking ? null : request.temperature;

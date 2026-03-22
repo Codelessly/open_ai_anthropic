@@ -515,4 +515,134 @@ void main() {
       expect(firstBlock.containsKey('cache_control'), isFalse, reason: 'CacheRetention.none should skip cache_control');
     });
   });
+
+  // =========================================================================
+  // JSON schema + thinking compatibility
+  //
+  // Anthropic API rejects requests that combine extended thinking with
+  // tool_choice: {type: "tool", name: "..."} (forced specific tool).
+  // tool_choice: {type: "any"} IS compatible with thinking.
+  //
+  // When the converter injects adaptive thinking (isOAuth + 4.6 model) AND
+  // converts responseFormat jsonSchema to a forced tool, it must downgrade
+  // tool_choice from "tool" to "any" to avoid a 400 error.
+  // =========================================================================
+  group('JSON schema + thinking compatibility', () {
+    test('uses toolChoice "any" when thinking is active (OAuth + 4.6 model + jsonSchema)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        responseFormat: ResponseFormat.jsonSchema(
+          name: 'TestResponse',
+          strict: false,
+          schema: {
+            'type': 'object',
+            'properties': {
+              'answer': {'type': 'string'},
+            },
+          },
+        ),
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      // Should have thinking enabled
+      final json = result.toJson();
+      expect(json['thinking'], isNotNull, reason: 'Thinking should be active for 4.6 OAuth');
+
+      // Should have the JSON schema tool
+      expect(result.tools, isNotNull);
+      final toolNames = result.tools!.map((t) {
+        if (t is anthropic.CustomToolDefinition) return t.tool.name;
+        return null;
+      }).toList();
+      expect(toolNames, contains(jsonSchemaToolName));
+
+      // tool_choice must be "any", NOT "tool" — forced tool is incompatible with thinking
+      expect(result.toolChoice, isNotNull);
+      expect(
+        result.toolChoice,
+        isA<anthropic.ToolChoiceAny>(),
+        reason: 'Forced tool_choice is incompatible with thinking; must use "any"',
+      );
+    });
+
+    test('keeps toolChoice "tool" when thinking is NOT active (non-OAuth + jsonSchema)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+        responseFormat: ResponseFormat.jsonSchema(
+          name: 'TestResponse',
+          strict: false,
+          schema: {
+            'type': 'object',
+            'properties': {
+              'answer': {'type': 'string'},
+            },
+          },
+        ),
+      );
+
+      final result = converter.convert(request, isOAuth: false);
+
+      // No thinking
+      final json = result.toJson();
+      expect(json.containsKey('thinking'), isFalse);
+
+      // tool_choice should be forced to the specific tool (more deterministic)
+      expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
+    });
+
+    test('keeps toolChoice "tool" when thinking is NOT active (non-4.6 model + OAuth + jsonSchema)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [ChatMessage.user('Hello')],
+        responseFormat: ResponseFormat.jsonSchema(
+          name: 'TestResponse',
+          strict: false,
+          schema: {
+            'type': 'object',
+            'properties': {
+              'answer': {'type': 'string'},
+            },
+          },
+        ),
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      // No thinking for non-4.6 model
+      final json = result.toJson();
+      expect(json.containsKey('thinking'), isFalse);
+
+      // tool_choice should remain forced to specific tool
+      expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
+    });
+
+    test('uses toolChoice "any" for opus-4-6 with jsonSchema in OAuth', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-opus-4-6',
+        messages: [ChatMessage.user('Hello')],
+        responseFormat: ResponseFormat.jsonSchema(
+          name: 'TestResponse',
+          strict: false,
+          schema: {
+            'type': 'object',
+            'properties': {
+              'answer': {'type': 'string'},
+            },
+          },
+        ),
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      // Thinking should be active
+      final json = result.toJson();
+      expect(json['thinking'], isNotNull);
+
+      // tool_choice must be "any"
+      expect(result.toolChoice, isA<anthropic.ToolChoiceAny>());
+    });
+  });
 }
