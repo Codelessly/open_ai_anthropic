@@ -520,15 +520,15 @@ void main() {
   // JSON schema + thinking compatibility
   //
   // Anthropic API rejects requests that combine extended thinking with
-  // tool_choice: {type: "tool", name: "..."} (forced specific tool).
-  // tool_choice: {type: "any"} IS compatible with thinking.
+  // any form of forced tool choice (tool_choice: tool OR any).
+  // Only tool_choice: auto works with thinking.
   //
-  // When the converter injects adaptive thinking (isOAuth + 4.6 model) AND
-  // converts responseFormat jsonSchema to a forced tool, it must downgrade
-  // tool_choice from "tool" to "any" to avoid a 400 error.
+  // Since auto doesn't guarantee the model calls the JSON schema tool,
+  // the converter disables thinking when JSON schema output is required,
+  // keeping forced tool choice for deterministic structured output.
   // =========================================================================
   group('JSON schema + thinking compatibility', () {
-    test('uses toolChoice "any" when thinking is active (OAuth + 4.6 model + jsonSchema)', () {
+    test('disables thinking when JSON schema is active (OAuth + 4.6 model + jsonSchema)', () {
       final request = ChatCompletionCreateRequest(
         model: 'claude-sonnet-4-6',
         messages: [ChatMessage.user('Hello')],
@@ -546,9 +546,11 @@ void main() {
 
       final result = converter.convert(request, isOAuth: true);
 
-      // Should have thinking enabled
+      // Thinking must be disabled — incompatible with forced tool choice
       final json = result.toJson();
-      expect(json['thinking'], isNotNull, reason: 'Thinking should be active for 4.6 OAuth');
+      expect(json.containsKey('thinking'), isFalse,
+        reason: 'Thinking must be skipped when JSON schema forces tool choice',
+      );
 
       // Should have the JSON schema tool
       expect(result.tools, isNotNull);
@@ -558,13 +560,8 @@ void main() {
       }).toList();
       expect(toolNames, contains(jsonSchemaToolName));
 
-      // tool_choice must be "any", NOT "tool" — forced tool is incompatible with thinking
-      expect(result.toolChoice, isNotNull);
-      expect(
-        result.toolChoice,
-        isA<anthropic.ToolChoiceAny>(),
-        reason: 'Forced tool_choice is incompatible with thinking; must use "any"',
-      );
+      // tool_choice should be forced to the specific tool (deterministic)
+      expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
     });
 
     test('keeps toolChoice "tool" when thinking is NOT active (non-OAuth + jsonSchema)', () {
@@ -619,7 +616,7 @@ void main() {
       expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
     });
 
-    test('uses toolChoice "any" for opus-4-6 with jsonSchema in OAuth', () {
+    test('disables thinking for opus-4-6 with jsonSchema in OAuth', () {
       final request = ChatCompletionCreateRequest(
         model: 'claude-opus-4-6',
         messages: [ChatMessage.user('Hello')],
@@ -637,12 +634,26 @@ void main() {
 
       final result = converter.convert(request, isOAuth: true);
 
-      // Thinking should be active
+      // Thinking must be disabled for JSON schema
+      final json = result.toJson();
+      expect(json.containsKey('thinking'), isFalse);
+
+      // tool_choice forced to specific tool
+      expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
+    });
+
+    test('still enables thinking for 4.6 OAuth WITHOUT jsonSchema', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+
+      // Thinking should be active when no JSON schema
       final json = result.toJson();
       expect(json['thinking'], isNotNull);
-
-      // tool_choice must be "any"
-      expect(result.toolChoice, isA<anthropic.ToolChoiceAny>());
+      expect((json['thinking'] as Map)['type'], 'adaptive');
     });
   });
 }

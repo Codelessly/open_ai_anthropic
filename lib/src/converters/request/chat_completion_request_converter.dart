@@ -94,14 +94,14 @@ class ChatCompletionRequestConverter {
         ),
       );
       tools = [...?tools, jsonTool];
-      // Forced tool choice (tool_choice: {type: "tool", name: "..."}) is
-      // incompatible with extended thinking. When thinking will be active,
-      // use "any" instead — it still forces tool use but lets the model
-      // choose which tool, avoiding the API conflict.
-      toolChoice = useAdaptiveThinking
-          ? anthropic.ToolChoice.any()
-          : anthropic.ToolChoice.tool(jsonSchemaToolName);
+      toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
     }
+
+    // Forced tool choice (tool, any) is incompatible with extended thinking.
+    // Only tool_choice: auto works with thinking. Since auto doesn't guarantee
+    // the model calls the JSON schema tool, we disable thinking instead when
+    // JSON schema structured output is required.
+    final skipThinking = useAdaptiveThinking && responseFormat is JsonSchemaResponseFormat;
 
     // Build system prompt — for OAuth, prepend Claude Code identity with cache_control
     // Cache control respects the retention policy (#9)
@@ -129,8 +129,9 @@ class ChatCompletionRequestConverter {
       system = systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null;
     }
 
-    // Temperature is incompatible with thinking — must not send both
-    final effectiveTemperature = useAdaptiveThinking ? null : request.temperature;
+    // Temperature is incompatible with thinking — must not send both.
+    // When thinking is skipped (e.g. for JSON schema), keep the temperature.
+    final effectiveTemperature = (useAdaptiveThinking && !skipThinking) ? null : request.temperature;
 
     // Forward user as metadata.user_id (#21)
     final metadata = request.user != null ? anthropic.Metadata(userId: request.user) : null;
@@ -164,8 +165,9 @@ class ChatCompletionRequestConverter {
       final body = anthropicRequest.toJson();
       bool modified = false;
 
-      // Inject adaptive thinking for 4.6 models
-      if (useAdaptiveThinking && !body.containsKey('thinking')) {
+      // Inject adaptive thinking for 4.6 models — but skip when JSON schema
+      // output requires forced tool choice (incompatible with thinking).
+      if (useAdaptiveThinking && !skipThinking && !body.containsKey('thinking')) {
         body['thinking'] = {'type': 'adaptive'};
         modified = true;
       }
