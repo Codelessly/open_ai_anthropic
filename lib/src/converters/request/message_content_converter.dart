@@ -217,6 +217,12 @@ class MessageContentConverter {
         );
         return null;
       }(),
+      FileContentPart(:final fileData, :final fileId) => () {
+        final source = fileData ?? fileId;
+        if (source == null || source.isEmpty) return null;
+        return _convertImagePart(source);
+      }(),
+      RefusalContentPart(:final refusal) => anthropic.InputContentBlock.text(_sanitizeSurrogates(refusal)),
     };
   }
 

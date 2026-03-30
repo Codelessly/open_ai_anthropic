@@ -63,6 +63,18 @@ class ToolMapper {
         name,
         disableParallelToolUse: disableParallel,
       ),
+      ToolChoiceAllowedTools(:final mode, :final tools) => tools.isNotEmpty
+          ? anthropic.ToolChoice.tool(
+              ((tools.first['function'] as Map<String, dynamic>)['name'] as String?) ?? '',
+              disableParallelToolUse: disableParallel,
+            )
+          : (mode == 'required'
+              ? anthropic.ToolChoice.any(disableParallelToolUse: disableParallel)
+              : anthropic.ToolChoice.auto(disableParallelToolUse: disableParallel)),
+      ToolChoiceCustom(:final name) => anthropic.ToolChoice.tool(
+        name,
+        disableParallelToolUse: disableParallel,
+      ),
     };
   }
 
