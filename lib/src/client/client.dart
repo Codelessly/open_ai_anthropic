@@ -17,6 +17,14 @@ import '../converters/streaming/stream_event_transformer.dart';
 /// other provider-specific mutations.
 typedef BodyTransformer = void Function(Map<String, dynamic> body);
 
+/// Beta feature headers required for full thinking/effort support.
+/// See: https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+const List<String> kThinkingBetaHeaders = [
+  'interleaved-thinking-2025-02-07',
+  'redact-thinking-2026-02-12',
+  'effort-2025-11-24',
+];
+
 /// Cache retention policy for Anthropic prompt caching.
 enum CacheRetention {
   /// No caching — cache_control is omitted entirely.
@@ -109,13 +117,14 @@ class AnthropicOpenAIClient extends OpenAIClient {
     this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
+    String? defaultEffort = kDefaultAdaptiveEffort,
   }) : _apiKey = apiKey,
        _baseUrl = baseUrl,
        _headers = headers,
        _queryParams = queryParams,
        _retries = retries,
        _ownHttpClient = client,
-       _requestConverter = ChatCompletionRequestConverter(),
+       _requestConverter = ChatCompletionRequestConverter(defaultEffort: defaultEffort),
        _responseConverter = ChatCompletionResponseConverter(),
        super(httpClient: client) {
     _resourceHttpClient = client ?? http.Client();
@@ -327,7 +336,8 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   }) async {
     final requestModel = request.model;
     final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
-    final anthropicResponse = await anthropicClient.messages.create(anthropicRequest);
+    final betas = isOAuth ? kThinkingBetaHeaders : const <String>[];
+    final anthropicResponse = await anthropicClient.messages.create(anthropicRequest, betas: betas);
     final originalToolNames = isOAuth ? request.tools?.map((t) => t.function.name).toList() : null;
     final converted = responseConverter.convert(
       anthropicResponse,
@@ -361,6 +371,7 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
       isOAuth: isOAuth,
       originalToolNames: originalToolNames,
     );
-    return anthropicClient.messages.createStream(anthropicRequest).transform(transformer);
+    final betas = isOAuth ? kThinkingBetaHeaders : const <String>[];
+    return anthropicClient.messages.createStream(anthropicRequest, betas: betas).transform(transformer);
   }
 }

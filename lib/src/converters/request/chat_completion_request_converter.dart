@@ -16,13 +16,29 @@ const String jsonSchemaToolName = '__json_response';
 const String _claudeCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Converts OpenAI chat completion requests to Anthropic create message requests.
+/// Default effort level for auto-injected adaptive thinking.
+///
+/// 'medium' is Anthropic's recommendation for Sonnet 4.6 agentic workloads.
+/// Claude thinks moderately and may skip thinking for simple queries.
+/// Use 'low' for minimal thinking, 'high'/'max' for deep reasoning.
+///
+/// Set to `null` to disable auto-injection of effort (API default = 'high').
+/// Requires the `effort-2025-11-24` beta header.
+const String kDefaultAdaptiveEffort = 'medium';
+
 class ChatCompletionRequestConverter {
   final MessageContentConverter _messageConverter;
   final ToolMapper _toolMapper;
 
+  /// The effort level to inject when auto-enabling adaptive thinking for OAuth.
+  /// Defaults to [kDefaultAdaptiveEffort]. Set to `null` to let the API decide
+  /// (which defaults to 'high' — use with caution on complex prompts).
+  final String? defaultEffort;
+
   ChatCompletionRequestConverter({
     MessageContentConverter? messageConverter,
     ToolMapper? toolMapper,
+    this.defaultEffort = kDefaultAdaptiveEffort,
   }) : _messageConverter = messageConverter ?? MessageContentConverter(),
        _toolMapper = toolMapper ?? ToolMapper();
 
@@ -169,6 +185,13 @@ class ChatCompletionRequestConverter {
       // output requires forced tool choice (incompatible with thinking).
       if (useAdaptiveThinking && !skipThinking && !body.containsKey('thinking')) {
         body['thinking'] = {'type': 'adaptive'};
+        // Inject default effort alongside adaptive thinking to prevent
+        // unbounded thinking loops. Without effort, the API defaults to 'high'
+        // which causes 10–20 minute thinking on complex prompts.
+        // Requires the effort-2025-11-24 beta header.
+        if (defaultEffort != null && !body.containsKey('output_config')) {
+          body['output_config'] = {'effort': defaultEffort};
+        }
         modified = true;
       }
 

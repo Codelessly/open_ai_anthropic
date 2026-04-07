@@ -69,13 +69,19 @@ class MessageContentConverter {
           break;
 
         case UserMessage():
-          // If there are pending tool results, send them first as a user message
+          // If there are pending tool results, send them first as a user message.
+          // When the UserMessage contains multimodal content (e.g. images from a
+          // tool result), merge it into the same Anthropic user message to avoid
+          // consecutive user messages (which Anthropic rejects).
           if (pendingToolResults.isNotEmpty) {
-            // Insert synthetic error results for any orphaned tool calls
             _insertSyntheticResults(pendingToolCallIds, pendingToolResults);
-            result.add(_createToolResultMessage(pendingToolResults));
+            result.add(_createToolResultMessageWithUserContent(
+              pendingToolResults,
+              message.content,
+            ));
             pendingToolResults.clear();
             pendingToolCallIds.clear();
+            break;
           } else if (pendingToolCallIds.isNotEmpty) {
             // Assistant had tool calls but no tool results at all — all orphaned
             final syntheticResults = <String, String>{};
@@ -182,6 +188,38 @@ class MessageContentConverter {
       final isError = entry.value == 'No result provided';
       return _toolMapper.toToolResultBlock(entry.key, entry.value, isError: isError ? true : null);
     }).toList();
+
+    return anthropic.InputMessage(
+      role: anthropic.MessageRole.user,
+      content: anthropic.MessageContent.blocks(blocks),
+    );
+  }
+
+  /// Creates an Anthropic user message containing tool results merged with
+  /// additional user content (e.g. images from multimodal tool results).
+  ///
+  /// This avoids consecutive user messages which Anthropic rejects. The tool
+  /// result blocks and user content blocks are combined into a single message.
+  anthropic.InputMessage _createToolResultMessageWithUserContent(
+    Map<String, String> results,
+    UserMessageContent userContent,
+  ) {
+    final blocks = <anthropic.InputContentBlock>[
+      for (final entry in results.entries)
+        _toolMapper.toToolResultBlock(
+          entry.key,
+          entry.value,
+          isError: entry.value == 'No result provided' ? true : null,
+        ),
+    ];
+
+    // Append user content blocks (images, text, etc.)
+    final userBlocks = switch (userContent) {
+      UserTextContent(:final text) => [anthropic.InputContentBlock.text(_sanitizeSurrogates(text))],
+      UserPartsContent(:final parts) =>
+        parts.map(_convertContentPart).whereType<anthropic.InputContentBlock>().toList(),
+    };
+    blocks.addAll(userBlocks);
 
     return anthropic.InputMessage(
       role: anthropic.MessageRole.user,

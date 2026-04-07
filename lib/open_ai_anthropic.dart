@@ -37,6 +37,7 @@
 library;
 
 export 'src/client/claude_code_client.dart' show ClaudeCodeOpenAIClient;
-export 'src/client/client.dart' show AnthropicOpenAIClient, BodyTransformer, CacheRetention;
+export 'src/client/client.dart' show AnthropicOpenAIClient, BodyTransformer, CacheRetention, kThinkingBetaHeaders;
+export 'src/converters/request/chat_completion_request_converter.dart' show kDefaultAdaptiveEffort;
 export 'src/model/claude_code_credentials.dart';
 export 'src/utils/claude_code_token_store.dart';

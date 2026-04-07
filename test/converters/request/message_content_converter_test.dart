@@ -374,4 +374,107 @@ void main() {
       }
     });
   });
+
+  // =========================================================================
+  // #24 — Multimodal tool results: merge trailing UserMessage into tool result
+  // =========================================================================
+  group('multimodal tool result merging (#24)', () {
+    test('merges user message with images into tool result message', () {
+      // Simulates the flow from openai_client.dart: a ToolMessage with text
+      // followed by a UserMessage carrying the image content parts.
+      final messages = <ChatMessage>[
+        ChatMessage.user('Take a screenshot'),
+        ChatMessage.assistant(
+          toolCalls: [
+            ToolCall(
+              id: 'call_screenshot',
+              type: 'function',
+              function: FunctionCall(name: 'screenshot', arguments: '{}'),
+            ),
+          ],
+        ),
+        ChatMessage.tool(
+          toolCallId: 'call_screenshot',
+          content: 'Screenshot captured successfully (1024 bytes).',
+        ),
+        // Image injected by openai_client.dart for multimodal tool results
+        ChatMessage.user(
+          UserMessageContent.parts([
+            ContentPart.imageUrl('data:image/png;base64,iVBORw0KGgo='),
+          ]),
+        ),
+      ];
+
+      final result = converter.convertMessages(messages);
+
+      // Should be 3 messages: user, assistant, merged(tool_result + image)
+      // NOT 4 (which would have consecutive user messages that Anthropic rejects)
+      expect(result.length, 3,
+          reason: 'UserMessage after tool results should merge, not create consecutive user messages');
+
+      // The last message should contain both tool_result and image blocks
+      final mergedMsg = result.last;
+      expect(mergedMsg.role, anthropic.MessageRole.user);
+      switch (mergedMsg.content) {
+        case anthropic.BlocksMessageContent(:final blocks):
+          final toolResults = blocks.whereType<anthropic.ToolResultInputBlock>().toList();
+          final imageBlocks = blocks.whereType<anthropic.ImageInputBlock>().toList();
+          expect(toolResults.length, 1, reason: 'Should contain the tool_result block');
+          expect(imageBlocks.length, 1, reason: 'Should contain the image block from the UserMessage');
+        default:
+          fail('Expected BlocksMessageContent with mixed tool_result and image blocks');
+      }
+    });
+
+    test('merges user text message into tool result message', () {
+      final messages = <ChatMessage>[
+        ChatMessage.user('Do something'),
+        ChatMessage.assistant(
+          toolCalls: [
+            ToolCall(
+              id: 'call_1',
+              type: 'function',
+              function: FunctionCall(name: 'my_tool', arguments: '{}'),
+            ),
+          ],
+        ),
+        ChatMessage.tool(toolCallId: 'call_1', content: 'done'),
+        ChatMessage.user('Thanks, now do something else'),
+      ];
+
+      final result = converter.convertMessages(messages);
+
+      // Should merge to avoid consecutive user messages
+      expect(result.length, 3,
+          reason: 'UserMessage after tool results should merge');
+
+      final mergedMsg = result.last;
+      switch (mergedMsg.content) {
+        case anthropic.BlocksMessageContent(:final blocks):
+          final toolResults = blocks.whereType<anthropic.ToolResultInputBlock>().toList();
+          final textBlocks = blocks.whereType<anthropic.TextInputBlock>().toList();
+          expect(toolResults.length, 1);
+          expect(textBlocks.length, 1);
+          expect(textBlocks.first.text, 'Thanks, now do something else');
+        default:
+          fail('Expected BlocksMessageContent');
+      }
+    });
+
+    test('standalone user message without preceding tool results is not affected', () {
+      final messages = <ChatMessage>[
+        ChatMessage.user('Hello'),
+        ChatMessage.assistant(content: 'Hi there!'),
+        ChatMessage.user('How are you?'),
+      ];
+
+      final result = converter.convertMessages(messages);
+
+      // Normal flow: user, assistant, user — no merging needed
+      expect(result.length, 3);
+      expect(result[0].role, anthropic.MessageRole.user);
+      expect(result[1].role, anthropic.MessageRole.assistant);
+      expect(result[2].role, anthropic.MessageRole.user);
+    });
+  });
 }
