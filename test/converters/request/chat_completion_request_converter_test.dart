@@ -357,7 +357,7 @@ void main() {
       expect(tool1.tool.name, 'my_custom_tool'); // Unknown, unchanged
     });
 
-    test('applies cache_control to last user message', () {
+    test('applies cache_control to last message (user)', () {
       final request = ChatCompletionCreateRequest(
         model: 'claude-sonnet-4-6',
         messages: [
@@ -370,14 +370,38 @@ void main() {
       final result = converter.convert(request, isOAuth: true);
       final json = result.toJson();
       final messages = json['messages'] as List;
-      // Find last user message
-      final lastUser = messages.lastWhere((m) => (m as Map)['role'] == 'user') as Map;
-      final content = lastUser['content'];
+      final lastMsg = messages.last as Map;
+      expect(lastMsg['role'], equals('user'));
+      final content = lastMsg['content'];
+      if (content is List && content.isNotEmpty) {
+        final lastBlock = content.last as Map;
+        expect(lastBlock.containsKey('cache_control'), isTrue);
+      } else {
+        fail('Last message should have blocks format with cache_control');
+      }
+    });
+
+    test('applies cache_control to last message (assistant)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.user('Hello'),
+          ChatMessage.assistant(content: 'Response with tool calls'),
+        ],
+      );
+
+      final result = converter.convert(request, isOAuth: true);
+      final json = result.toJson();
+      final messages = json['messages'] as List;
+      final lastMsg = messages.last as Map;
+      expect(lastMsg['role'], equals('assistant'));
+      final content = lastMsg['content'];
       if (content is List && content.isNotEmpty) {
         final lastBlock = content.last as Map;
         expect(lastBlock.containsKey('cache_control'), isTrue);
       } else if (content is String) {
-        fail('Last user message should have blocks format with cache_control');
+        // String content gets converted to blocks format with cache_control
+        fail('Last message should have blocks format with cache_control');
       }
     });
 

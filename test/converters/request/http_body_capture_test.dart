@@ -2,6 +2,8 @@
 /// api.anthropic.com by ClaudeCodeClient on first vs recurring calls.
 ///
 /// Uses a mock HTTP client to intercept the body before it leaves the process.
+library;
+
 import 'dart:async';
 import 'dart:convert';
 

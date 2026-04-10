@@ -33,7 +33,20 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
   final ClaudeCodeTokenStore _tokenStore;
   final bool debugLogNetworkRequests;
 
+  /// Whether to include the `context-1m-2025-08-07` beta header for 1M
+  /// context window access.
+  ///
+  /// Reference: claude-code/src/utils/betas.ts line 254 + context.ts lines 35-39
+  ///   Claude Code adds this header when the model ID contains `[1m]`
+  ///   (e.g. `claude-opus-4-6[1m]`). It's the only beta API key users can
+  ///   pass via SDK options.
+  final bool use1mContext;
+
   ClaudeCodeCredentials get credentials => _tokenStore.credentials;
+
+  /// The `context-1m-2025-08-07` beta header value.
+  /// Ref: claude-code/src/constants/betas.ts line 6
+  static const String context1mBetaHeader = 'context-1m-2025-08-07';
 
   /// Default beta header for non-model-specific use (includes all betas).
   /// Includes effort-2025-11-24 required for output_config.effort to function.
@@ -44,7 +57,10 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
   /// For 4.6 models (adaptive thinking), omits the deprecated
   /// interleaved-thinking beta header (#15).
   /// Always includes effort-2025-11-24 for output_config.effort support.
-  static String buildBetaHeader(String modelId) {
+  ///
+  /// If [use1mContext] is true, appends the `context-1m-2025-08-07` header.
+  /// Ref: claude-code/src/utils/betas.ts lines 254-256
+  static String buildBetaHeader(String modelId, {bool use1mContext = false}) {
     final betas = [
       'claude-code-20250219',
       'oauth-2025-04-20',
@@ -59,10 +75,16 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     if (needsInterleavedBeta) {
       betas.add('interleaved-thinking-2025-05-14');
     }
+    if (use1mContext) {
+      betas.add(context1mBetaHeader);
+    }
     return betas.join(',');
   }
 
   /// Creates a new ClaudeCodeOpenAIClient.
+  ///
+  /// Set [use1mContext] to `true` to include the `context-1m-2025-08-07` beta
+  /// header, enabling 1M token context window. Defaults to `false` (200K).
   ClaudeCodeOpenAIClient({
     ClaudeCodeCredentials? credentials,
     ClaudeCodeTokenStore? tokenStore,
@@ -74,9 +96,14 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     super.responseBodyTransformer,
     TokenRefreshedCallback? onTokenRefreshed,
     this.debugLogNetworkRequests = false,
+    this.use1mContext = false,
   }) : assert(credentials != null || tokenStore != null, 'Either credentials or tokenStore must be provided.'),
        _tokenStore = tokenStore ?? ClaudeCodeTokenStore(credentials!, onTokenRefreshedCallback: onTokenRefreshed),
        super(apiKey: '', isOAuth: true);
+
+  /// The resolved beta header string for this client instance.
+  String get resolvedBetaHeader =>
+      use1mContext ? '$anthropicBeta,$context1mBetaHeader' : anthropicBeta;
 
   @override
   anthropic.AnthropicClient buildAnthropicClient() => AnthropicAuthenticatedClient(
@@ -86,16 +113,18 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
     queryParams: queryParams,
     retries: anthropicRetries,
     debugLogNetworkRequests: debugLogNetworkRequests,
+    betaHeader: resolvedBetaHeader,
   );
 }
 
 class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
   static http.Client _buildAuthenticatedClient(
     ClaudeCodeTokenStore tokenStore,
+    String betaHeader,
     bool debug,
   ) => InterceptedClient.build(
     interceptors: [
-      _AnthropicAuthInterceptor(tokenStore: tokenStore),
+      _AnthropicAuthInterceptor(tokenStore: tokenStore, betaHeader: betaHeader),
       if (debug) LoggerInterceptor(),
     ],
   );
@@ -107,6 +136,7 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
     int retries = 3,
     required ClaudeCodeTokenStore tokenStore,
     bool debugLogNetworkRequests = false,
+    String betaHeader = ClaudeCodeOpenAIClient.anthropicBeta,
   }) : super(
          config: anthropic.AnthropicConfig(
            // OAuth handles auth — no API key header should be added.
@@ -118,19 +148,20 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
            defaultQueryParams: queryParams?.map((k, v) => MapEntry(k, '$v')) ?? const {},
            retryPolicy: anthropic.RetryPolicy(maxRetries: retries),
          ),
-         httpClient: _buildAuthenticatedClient(tokenStore, debugLogNetworkRequests),
+         httpClient: _buildAuthenticatedClient(tokenStore, betaHeader, debugLogNetworkRequests),
        );
 
   /// Injects the necessary authentication headers into the request.
   /// Matches pi-mono's OAuth client construction for Claude Code compatibility.
   static Future<Map<String, String>> _injectHeaders(
     ClaudeCodeTokenStore tokenStore,
+    String betaHeader,
     Map<String, String> headers,
   ) async {
     return {
         ...headers,
         'Authorization': 'Bearer ${await tokenStore.getAccessToken()}',
-        'anthropic-beta': ClaudeCodeOpenAIClient.anthropicBeta,
+        'anthropic-beta': betaHeader,
         'user-agent': 'claude-cli/2.1.75',
         'x-app': 'cli',
         'accept': 'application/json',
@@ -143,14 +174,16 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
 
 class _AnthropicAuthInterceptor implements InterceptorContract {
   final ClaudeCodeTokenStore tokenStore;
+  final String betaHeader;
 
-  _AnthropicAuthInterceptor({required this.tokenStore});
+  _AnthropicAuthInterceptor({required this.tokenStore, required this.betaHeader});
 
   @override
   FutureOr<BaseRequest> interceptRequest({required BaseRequest request}) async {
     return request.copyWith(
       headers: await AnthropicAuthenticatedClient._injectHeaders(
         tokenStore,
+        betaHeader,
         request.headers,
       ),
     );

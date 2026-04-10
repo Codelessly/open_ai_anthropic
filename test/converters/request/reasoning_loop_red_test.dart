@@ -2,6 +2,8 @@
 /// thinking and output_config on both first and recurring calls.
 ///
 /// These tests go through the ACTUAL converter pipeline used by ClaudeCodeClient.
+library;
+
 import 'package:openai_dart/openai_dart.dart';
 import 'package:test/test.dart';
 

@@ -119,8 +119,18 @@ class ChatCompletionRequestConverter {
     // JSON schema structured output is required.
     final skipThinking = useAdaptiveThinking && responseFormat is JsonSchemaResponseFormat;
 
-    // Build system prompt — for OAuth, prepend Claude Code identity with cache_control
-    // Cache control respects the retention policy (#9)
+    // Build system prompt — for OAuth, prepend Claude Code identity with cache_control.
+    // Cache control respects the retention policy (#9).
+    //
+    // Reference: claude-code/src/services/api/claude.ts
+    //   getCacheControl()           — lines 358-374 (builds {type:'ephemeral', ttl?, scope?})
+    //   buildSystemPromptBlocks()   — lines 3213-3237 (splits system prompt into cached blocks)
+    //
+    // Differences from reference:
+    //   - Claude Code splits into up to 4 blocks with global/org/null scopes.
+    //     We use 2 blocks (identity + user prompt), both with the same retention.
+    //   - Claude Code supports scope:'global' and scope:'org' for cross-session
+    //     sharing. We don't implement scopes yet.
     final cacheControl = cacheRetention == CacheRetention.none
         ? null
         : anthropic.CacheControlEphemeral(
@@ -195,36 +205,75 @@ class ChatCompletionRequestConverter {
         modified = true;
       }
 
-      // Apply cache_control to last user message's last content block
-      // Respects cacheRetention (#9)
+      // Apply cache_control to the last message's last content block.
+      // Respects cacheRetention (#9).
+      //
+      // Reference: claude-code/src/services/api/claude.ts
+      //   addCacheBreakpoints()            — lines 3063-3211
+      //   userMessageToMessageParam()      — lines 588-631
+      //   assistantMessageToMessageParam() — lines 633-674
+      //
+      // Key design decisions from reference (lines 3078-3088):
+      //   - Exactly one message-level cache_control marker per request.
+      //   - Mycro's turn-to-turn eviction frees local-attention KV pages
+      //     at any cached prefix position NOT in
+      //     cache_store_int_token_boundaries. With two markers the
+      //     second-to-last position's locals survive an extra turn for
+      //     nothing; with one marker they're freed immediately.
+      //   - Marker goes on the absolute last message (any role).
+      //   - For array content, marker goes on the last non-thinking block
+      //     (ref: assistantMessageToMessageParam lines 658-661 skips
+      //     'thinking' and 'redacted_thinking').
       final ccJson = cacheControl?.toJson();
       final msgs = body['messages'];
       if (ccJson != null && msgs is List) {
         for (int i = msgs.length - 1; i >= 0; i--) {
           final msg = msgs[i];
-          if (msg is Map && msg['role'] == 'user') {
-            final content = msg['content'];
-            if (content is String) {
-              msg['content'] = [
-                {
-                  'type': 'text',
-                  'text': content,
-                  'cache_control': ccJson,
-                },
-              ];
-              modified = true;
-            } else if (content is List && content.isNotEmpty) {
-              final lastBlock = content.last;
-              if (lastBlock is Map && !lastBlock.containsKey('cache_control')) {
-                content[content.length - 1] = <String, dynamic>{
-                  for (final e in lastBlock.entries) e.key as String: e.value,
+          if (msg is! Map) continue;
+          final content = msg['content'];
+
+          // String content → wrap to block format with cache_control.
+          // Ref: userMessageToMessageParam lines 595-607 (string branch)
+          if (content is String && content.isNotEmpty) {
+            msg['content'] = [
+              {
+                'type': 'text',
+                'text': content,
+                'cache_control': ccJson,
+              },
+            ];
+            modified = true;
+            break;
+          } else if (content is List && content.isNotEmpty) {
+            // Array content → walk backward to find last non-thinking block.
+            // Ref: assistantMessageToMessageParam lines 656-665
+            //   (skips 'thinking' and 'redacted_thinking')
+            //
+            // Intentional divergence from reference: the TS code targets
+            // the absolute last block and silently skips the message if
+            // it's a thinking block. We walk backward, which is more
+            // defensive — we'll always find a cacheable block if one
+            // exists. Also omits 'connector_text' exclusion (ref line
+            // 661, feature-gated in TS, not yet shipped).
+            for (int j = content.length - 1; j >= 0; j--) {
+              final block = content[j];
+              if (block is! Map) continue;
+              final blockType = block['type'];
+              if (blockType == 'thinking' || blockType == 'redacted_thinking') {
+                continue;
+              }
+              if (!block.containsKey('cache_control')) {
+                content[j] = <String, dynamic>{
+                  for (final e in block.entries) e.key as String: e.value,
                   'cache_control': ccJson,
                 };
                 modified = true;
               }
+              break;
             }
             break;
           }
+          // Empty/null content — try previous message
         }
       }
 
