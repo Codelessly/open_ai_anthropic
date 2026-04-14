@@ -144,9 +144,11 @@ class ClaudeCodeOauthService {
       codeVerifier: request.verifier,
       state: request.state,
       redirectUri: redirectionUri ?? config.redirectUri,
-      extraBodyParams: {
-        'expires_in': 31536000, // 1 year in seconds, to get a long-lived token.
-      },
+      extraBodyParams: longLivedToken
+          ? {
+              'expires_in': 31536000, // 1 year in seconds, to get a long-lived token.
+            }
+          : null,
     );
   }
 }
