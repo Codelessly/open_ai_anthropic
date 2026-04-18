@@ -344,8 +344,11 @@ void main() {
       final json = usageEvent.toJson();
       final usageJson = json['usage'] as Map<String, dynamic>;
 
-      expect(usageJson['cache_creation_input_tokens'], 15000,
-          reason: 'Should fall back to nested CacheCreation when flat field is null');
+      expect(
+        usageJson['cache_creation_input_tokens'],
+        15000,
+        reason: 'Should fall back to nested CacheCreation when flat field is null',
+      );
       expect(usageEvent.usage!.promptTokens, 15100); // 100 + 15000
     });
   });

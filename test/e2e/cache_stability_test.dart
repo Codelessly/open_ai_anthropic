@@ -123,7 +123,8 @@ void main() {
       expect(
         r2Read,
         isNotNull,
-        reason: 'Call 2 MUST have cache reads — the system prompt prefix '
+        reason:
+            'Call 2 MUST have cache reads — the system prompt prefix '
             'should hit the cache from Call 1',
       );
       expect(
@@ -139,7 +140,8 @@ void main() {
       expect(
         cacheHitRatio,
         greaterThan(0.5),
-        reason: 'Cache hit ratio should be >50% (system prompt is most of it). '
+        reason:
+            'Cache hit ratio should be >50% (system prompt is most of it). '
             'Got ${(cacheHitRatio * 100).toStringAsFixed(1)}%. '
             'creation=$r2Creation, read=$r2Read, prompt=$r2Prompt',
       );
@@ -152,7 +154,8 @@ void main() {
       expect(
         r2CreationActual,
         lessThan(r1CacheTokens ~/ 2),
-        reason: 'Call 2 cache creation should be much smaller than the prefix. '
+        reason:
+            'Call 2 cache creation should be much smaller than the prefix. '
             'Call 1 cache=$r1CacheTokens, Call 2 created $r2CreationActual',
       );
 
@@ -203,7 +206,8 @@ void main() {
       expect(
         r3HitRatio,
         greaterThan(0.5),
-        reason: 'Call 3 cache hit ratio should be >50% even after 15s delay. '
+        reason:
+            'Call 3 cache hit ratio should be >50% even after 15s delay. '
             'Got ${(r3HitRatio * 100).toStringAsFixed(1)}%',
       );
 

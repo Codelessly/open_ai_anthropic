@@ -32,8 +32,7 @@ sealed class ClaudeCodeCredentials {
       throw FormatException('Invalid JSON format for ClaudeCredentials');
     }
     final map = Map<String, dynamic>.from(json);
-    if (map.containsKey('refresh_token') &&
-        (map['refresh_token'] as String?)?.isNotEmpty == true) {
+    if (map.containsKey('refresh_token') && (map['refresh_token'] as String?)?.isNotEmpty == true) {
       return ShortLivedClaudeCodeCredentials.fromJson(map);
     }
     return LongLivedClaudeCodeCredentials.fromJson(map);
@@ -42,8 +41,7 @@ sealed class ClaudeCodeCredentials {
   /// Creates the appropriate [ClaudeCodeCredentials] subtype from a JSON map.
   /// Uses the presence of a non-empty `refresh_token` field to determine the subtype.
   static ClaudeCodeCredentials fromJson(Map<String, dynamic> json) {
-    if (json.containsKey('refresh_token') &&
-        (json['refresh_token'] as String?)?.isNotEmpty == true) {
+    if (json.containsKey('refresh_token') && (json['refresh_token'] as String?)?.isNotEmpty == true) {
       return ShortLivedClaudeCodeCredentials.fromJson(json);
     }
     return LongLivedClaudeCodeCredentials.fromJson(json);
@@ -61,14 +59,9 @@ sealed class ClaudeCodeCredentials {
       int value => value,
       String value => DateTime.parse(value).toUtc().millisecondsSinceEpoch,
       null => switch (json['expires_in']) {
-        int value => DateTime.timestamp()
-            .add(Duration(seconds: value))
-            .toUtc()
-            .millisecondsSinceEpoch,
-        String value when int.tryParse(value) != null => DateTime.timestamp()
-            .add(Duration(seconds: int.parse(value)))
-            .toUtc()
-            .millisecondsSinceEpoch,
+        int value => DateTime.timestamp().add(Duration(seconds: value)).toUtc().millisecondsSinceEpoch,
+        String value when int.tryParse(value) != null =>
+          DateTime.timestamp().add(Duration(seconds: int.parse(value))).toUtc().millisecondsSinceEpoch,
         _ => null,
       },
       _ => null,
@@ -98,8 +91,7 @@ class ShortLivedClaudeCodeCredentials extends ClaudeCodeCredentials {
   /// Whether the access token is expired.
   /// Includes a buffer to proactively refresh tokens before they actually expire.
   @override
-  bool get isExpired =>
-      expiresAt.toUtc().difference(DateTime.timestamp()) <= expirationBuffer;
+  bool get isExpired => expiresAt.toUtc().difference(DateTime.timestamp()) <= expirationBuffer;
 
   Duration get expirationBuffer => Duration(minutes: 5);
 
@@ -116,8 +108,7 @@ class ShortLivedClaudeCodeCredentials extends ClaudeCodeCredentials {
       _$ShortLivedClaudeCodeCredentialsFromJson(json);
 
   @override
-  Map<String, dynamic> toJson() =>
-      _$ShortLivedClaudeCodeCredentialsToJson(this);
+  Map<String, dynamic> toJson() => _$ShortLivedClaudeCodeCredentialsToJson(this);
 
   @override
   bool operator ==(Object other) =>
@@ -168,8 +159,7 @@ class LongLivedClaudeCodeCredentials extends ClaudeCodeCredentials {
       _$LongLivedClaudeCodeCredentialsFromJson(json);
 
   @override
-  Map<String, dynamic> toJson() =>
-      _$LongLivedClaudeCodeCredentialsToJson(this);
+  Map<String, dynamic> toJson() => _$LongLivedClaudeCodeCredentialsToJson(this);
 
   @override
   bool operator ==(Object other) =>
@@ -191,8 +181,7 @@ class _DateTimeConverter implements JsonConverter<DateTime, int> {
   const _DateTimeConverter();
 
   @override
-  DateTime fromJson(int json) =>
-      DateTime.fromMillisecondsSinceEpoch(json, isUtc: true);
+  DateTime fromJson(int json) => DateTime.fromMillisecondsSinceEpoch(json, isUtc: true);
 
   @override
   int toJson(DateTime object) => object.toUtc().millisecondsSinceEpoch;

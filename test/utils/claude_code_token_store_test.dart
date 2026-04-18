@@ -7,25 +7,22 @@ import 'package:test/test.dart';
 import 'package:open_ai_anthropic/src/model/claude_code_credentials.dart';
 import 'package:open_ai_anthropic/src/utils/claude_code_token_store.dart';
 
-ShortLivedClaudeCodeCredentials _expiredCreds() =>
-    ShortLivedClaudeCodeCredentials(
-      accessToken: 'old-access-token',
-      refreshToken: 'test-refresh-token',
-      expiresAt: DateTime.timestamp().subtract(Duration(hours: 1)),
-    );
+ShortLivedClaudeCodeCredentials _expiredCreds() => ShortLivedClaudeCodeCredentials(
+  accessToken: 'old-access-token',
+  refreshToken: 'test-refresh-token',
+  expiresAt: DateTime.timestamp().subtract(Duration(hours: 1)),
+);
 
-ShortLivedClaudeCodeCredentials _validCreds() =>
-    ShortLivedClaudeCodeCredentials(
-      accessToken: 'valid-access-token',
-      refreshToken: 'test-refresh-token',
-      expiresAt: DateTime.timestamp().add(Duration(hours: 1)),
-    );
+ShortLivedClaudeCodeCredentials _validCreds() => ShortLivedClaudeCodeCredentials(
+  accessToken: 'valid-access-token',
+  refreshToken: 'test-refresh-token',
+  expiresAt: DateTime.timestamp().add(Duration(hours: 1)),
+);
 
-LongLivedClaudeCodeCredentials _expiredLongLivedCreds() =>
-    LongLivedClaudeCodeCredentials(
-      accessToken: 'long-lived-token',
-      expiresAt: DateTime.timestamp().subtract(Duration(hours: 1)),
-    );
+LongLivedClaudeCodeCredentials _expiredLongLivedCreds() => LongLivedClaudeCodeCredentials(
+  accessToken: 'long-lived-token',
+  expiresAt: DateTime.timestamp().subtract(Duration(hours: 1)),
+);
 
 MockClient _mockRefreshClient({
   String newAccessToken = 'new-access-token',
@@ -170,11 +167,13 @@ void main() {
 
         expect(
           () => store.refresh(),
-          throwsA(isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('Cannot refresh long-lived credentials'),
-          )),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('Cannot refresh long-lived credentials'),
+            ),
+          ),
         );
       });
     });

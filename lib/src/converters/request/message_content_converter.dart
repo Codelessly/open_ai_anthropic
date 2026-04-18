@@ -75,10 +75,12 @@ class MessageContentConverter {
           // consecutive user messages (which Anthropic rejects).
           if (pendingToolResults.isNotEmpty) {
             _insertSyntheticResults(pendingToolCallIds, pendingToolResults);
-            result.add(_createToolResultMessageWithUserContent(
-              pendingToolResults,
-              message.content,
-            ));
+            result.add(
+              _createToolResultMessageWithUserContent(
+                pendingToolResults,
+                message.content,
+              ),
+            );
             pendingToolResults.clear();
             pendingToolCallIds.clear();
             break;

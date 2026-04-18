@@ -409,8 +409,11 @@ void main() {
 
       // Should be 3 messages: user, assistant, merged(tool_result + image)
       // NOT 4 (which would have consecutive user messages that Anthropic rejects)
-      expect(result.length, 3,
-          reason: 'UserMessage after tool results should merge, not create consecutive user messages');
+      expect(
+        result.length,
+        3,
+        reason: 'UserMessage after tool results should merge, not create consecutive user messages',
+      );
 
       // The last message should contain both tool_result and image blocks
       final mergedMsg = result.last;
@@ -445,8 +448,7 @@ void main() {
       final result = converter.convertMessages(messages);
 
       // Should merge to avoid consecutive user messages
-      expect(result.length, 3,
-          reason: 'UserMessage after tool results should merge');
+      expect(result.length, 3, reason: 'UserMessage after tool results should merge');
 
       final mergedMsg = result.last;
       switch (mergedMsg.content) {

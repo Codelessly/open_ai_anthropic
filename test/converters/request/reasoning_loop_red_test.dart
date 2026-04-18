@@ -24,8 +24,7 @@ void main() {
       ],
     );
 
-    test('FIRST CALL: bodyTransformer injects both thinking and output_config',
-        () {
+    test('FIRST CALL: bodyTransformer injects both thinking and output_config', () {
       final result = converter.convert(
         request,
         isOAuth: true,
@@ -40,16 +39,13 @@ void main() {
       expect(json.containsKey('thinking'), isTrue);
       expect((json['thinking'] as Map)['type'], equals('adaptive'));
 
-      expect(json.containsKey('output_config'), isTrue,
-          reason: 'First call MUST have output_config');
+      expect(json.containsKey('output_config'), isTrue, reason: 'First call MUST have output_config');
       expect((json['output_config'] as Map)['effort'], equals('medium'));
 
       expect(json['max_tokens'], equals(16384));
     });
 
-    test(
-        'RECURRING CALL (after fix): bodyTransformer re-injects both fields',
-        () {
+    test('RECURRING CALL (after fix): bodyTransformer re-injects both fields', () {
       // After the fix, applyReasoningConfig runs on every call, so the
       // bodyTransformer always receives overrides from extraBody.
       final result = converter.convert(
@@ -67,8 +63,7 @@ void main() {
       expect(json.containsKey('thinking'), isTrue);
       expect((json['thinking'] as Map)['type'], equals('adaptive'));
 
-      expect(json.containsKey('output_config'), isTrue,
-          reason: 'Recurring call MUST have output_config after fix');
+      expect(json.containsKey('output_config'), isTrue, reason: 'Recurring call MUST have output_config after fix');
       expect((json['output_config'] as Map)['effort'], equals('medium'));
     });
 
@@ -123,8 +118,7 @@ void main() {
       expect((json['thinking'] as Map)['type'], equals('disabled'));
     });
 
-    test('OAuth block does NOT override explicit thinking from bodyTransformer',
-        () {
+    test('OAuth block does NOT override explicit thinking from bodyTransformer', () {
       final result = converter.convert(
         request,
         isOAuth: true,
@@ -149,8 +143,7 @@ void main() {
       final result = converter.convert(request, isOAuth: true);
       final json = result.toJson();
 
-      expect(json.containsKey('temperature'), isFalse,
-          reason: 'Temperature is incompatible with thinking');
+      expect(json.containsKey('temperature'), isFalse, reason: 'Temperature is incompatible with thinking');
     });
   });
 }

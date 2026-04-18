@@ -47,11 +47,12 @@ Map<String, dynamic> _$AnthropicOrganizationToJson(
   AnthropicOrganization instance,
 ) => <String, dynamic>{'uuid': instance.uuid, 'name': instance.name};
 
-AnthropicAccount _$AnthropicAccountFromJson(Map<String, dynamic> json) =>
-    AnthropicAccount(
-      uuid: json['uuid'] as String,
-      email: json['email_address'] as String,
-    );
+AnthropicAccount _$AnthropicAccountFromJson(Map<String, dynamic> json) => AnthropicAccount(
+  uuid: json['uuid'] as String,
+  email: json['email_address'] as String,
+);
 
-Map<String, dynamic> _$AnthropicAccountToJson(AnthropicAccount instance) =>
-    <String, dynamic>{'uuid': instance.uuid, 'email_address': instance.email};
+Map<String, dynamic> _$AnthropicAccountToJson(AnthropicAccount instance) => <String, dynamic>{
+  'uuid': instance.uuid,
+  'email_address': instance.email,
+};

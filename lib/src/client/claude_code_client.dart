@@ -102,8 +102,7 @@ class ClaudeCodeOpenAIClient extends AnthropicOpenAIClient {
        super(apiKey: '', isOAuth: true);
 
   /// The resolved beta header string for this client instance.
-  String get resolvedBetaHeader =>
-      use1mContext ? '$anthropicBeta,$context1mBetaHeader' : anthropicBeta;
+  String get resolvedBetaHeader => use1mContext ? '$anthropicBeta,$context1mBetaHeader' : anthropicBeta;
 
   @override
   anthropic.AnthropicClient buildAnthropicClient() => AnthropicAuthenticatedClient(

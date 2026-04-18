@@ -100,15 +100,17 @@ class ChatCompletionResponseConverter {
         usage: _convertUsage(anthropicMessage.usage),
         provider: 'anthropic',
       ),
-      cacheCreationInputTokens: anthropicMessage.usage.cacheCreationInputTokens ??
+      cacheCreationInputTokens:
+          anthropicMessage.usage.cacheCreationInputTokens ??
           (anthropicMessage.usage.cacheCreation != null
               ? anthropicMessage.usage.cacheCreation!.ephemeral5mInputTokens +
-                  anthropicMessage.usage.cacheCreation!.ephemeral1hInputTokens
+                    anthropicMessage.usage.cacheCreation!.ephemeral1hInputTokens
               : 0),
-      cacheReadInputTokens: anthropicMessage.usage.cacheReadInputTokens ??
+      cacheReadInputTokens:
+          anthropicMessage.usage.cacheReadInputTokens ??
           (anthropicMessage.usage.cacheRead != null
               ? anthropicMessage.usage.cacheRead!.ephemeral5mInputTokens +
-                  anthropicMessage.usage.cacheRead!.ephemeral1hInputTokens
+                    anthropicMessage.usage.cacheRead!.ephemeral1hInputTokens
               : 0),
     );
   }
@@ -142,11 +144,13 @@ class ChatCompletionResponseConverter {
   Usage _convertUsage(anthropic.Usage usage) {
     final inputTokens = usage.inputTokens;
     final outputTokens = usage.outputTokens;
-    final cacheReadTokens = usage.cacheReadInputTokens ??
+    final cacheReadTokens =
+        usage.cacheReadInputTokens ??
         (usage.cacheRead != null
             ? usage.cacheRead!.ephemeral5mInputTokens + usage.cacheRead!.ephemeral1hInputTokens
             : 0);
-    final cacheCreationTokens = usage.cacheCreationInputTokens ??
+    final cacheCreationTokens =
+        usage.cacheCreationInputTokens ??
         (usage.cacheCreation != null
             ? usage.cacheCreation!.ephemeral5mInputTokens + usage.cacheCreation!.ephemeral1hInputTokens
             : 0);

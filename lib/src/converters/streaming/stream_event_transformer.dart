@@ -120,15 +120,15 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
     // as Anthropic may return data only in the nested format.
     final usage = event.message.usage;
     state.inputTokens = usage.inputTokens;
-    state.cacheCreationInputTokens = usage.cacheCreationInputTokens ??
+    state.cacheCreationInputTokens =
+        usage.cacheCreationInputTokens ??
         (usage.cacheCreation != null
-            ? usage.cacheCreation!.ephemeral5mInputTokens +
-                usage.cacheCreation!.ephemeral1hInputTokens
+            ? usage.cacheCreation!.ephemeral5mInputTokens + usage.cacheCreation!.ephemeral1hInputTokens
             : 0);
-    state.cacheReadInputTokens = usage.cacheReadInputTokens ??
+    state.cacheReadInputTokens =
+        usage.cacheReadInputTokens ??
         (usage.cacheRead != null
-            ? usage.cacheRead!.ephemeral5mInputTokens +
-                usage.cacheRead!.ephemeral1hInputTokens
+            ? usage.cacheRead!.ephemeral5mInputTokens + usage.cacheRead!.ephemeral1hInputTokens
             : 0);
 
     // Emit initial chunk with role
@@ -208,9 +208,7 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         state.blockToolCallIndex[event.index] = toolCallIndex;
 
         // Reverse-map CC canonical names back to original (#20)
-        final resolvedName = isOAuth
-            ? fromClaudeCodeName(name, originalToolNames)
-            : name;
+        final resolvedName = isOAuth ? fromClaudeCodeName(name, originalToolNames) : name;
 
         return [
           _createResponse(
@@ -236,9 +234,7 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         final toolCallIndex = state.toolCallCount++;
         state.blockToolCallIndex[event.index] = toolCallIndex;
 
-        final resolvedName = isOAuth
-            ? fromClaudeCodeName(name, originalToolNames)
-            : name;
+        final resolvedName = isOAuth ? fromClaudeCodeName(name, originalToolNames) : name;
 
         return [
           _createResponse(

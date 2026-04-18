@@ -61,17 +61,14 @@ void main() {
       expect(body.containsKey('thinking'), isTrue);
       expect((body['thinking'] as Map)['type'], equals('adaptive'));
 
-      expect(body.containsKey('output_config'), isTrue,
-          reason: 'First call HTTP body MUST contain output_config');
+      expect(body.containsKey('output_config'), isTrue, reason: 'First call HTTP body MUST contain output_config');
       expect((body['output_config'] as Map)['effort'], equals('medium'));
 
       expect(body['max_tokens'], equals(16384));
       expect(body['stream'], isTrue);
     });
 
-    test(
-        'RECURRING CALL (after fix): HTTP body has thinking AND output_config',
-        () async {
+    test('RECURRING CALL (after fix): HTTP body has thinking AND output_config', () async {
       // After fix, applyReasoningConfig runs on recurring calls too, so
       // the bodyTransformer always gets the overrides.
       final body = await captureRequestBody(
@@ -84,8 +81,11 @@ void main() {
       expect(body.containsKey('thinking'), isTrue);
       expect((body['thinking'] as Map)['type'], equals('adaptive'));
 
-      expect(body.containsKey('output_config'), isTrue,
-          reason: 'Recurring call HTTP body MUST have output_config after fix');
+      expect(
+        body.containsKey('output_config'),
+        isTrue,
+        reason: 'Recurring call HTTP body MUST have output_config after fix',
+      );
       expect((body['output_config'] as Map)['effort'], equals('medium'));
     });
 

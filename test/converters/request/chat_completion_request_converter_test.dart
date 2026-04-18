@@ -572,7 +572,9 @@ void main() {
 
       // Thinking must be disabled — incompatible with forced tool choice
       final json = result.toJson();
-      expect(json.containsKey('thinking'), isFalse,
+      expect(
+        json.containsKey('thinking'),
+        isFalse,
         reason: 'Thinking must be skipped when JSON schema forces tool choice',
       );
 
