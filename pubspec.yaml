@@ -4,6 +4,8 @@ publish_to: none
 
 version: 0.3.0
 
+repository: https://github.com/Codelessly/open_ai_anthropic
+
 environment:
   sdk: ^3.11.0
 
