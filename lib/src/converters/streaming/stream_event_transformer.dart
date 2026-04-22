@@ -317,7 +317,10 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         ),
       ],
       // Signature, citations, and compaction deltas have no OpenAI equivalent
-      anthropic.SignatureDelta() || anthropic.CitationsDelta() || anthropic.CompactionDelta() => <ChatStreamEvent>[],
+      anthropic.SignatureDelta() ||
+      anthropic.CitationsDelta() ||
+      anthropic.CompactionDelta() ||
+      anthropic.UnknownContentBlockDelta() => <ChatStreamEvent>[],
     };
   }
 
