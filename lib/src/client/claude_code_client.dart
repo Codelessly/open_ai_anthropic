@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:anthropic_sdk_dart/anthropic_sdk_dart.dart' as anthropic;
 import 'package:http/http.dart' as http;
@@ -171,7 +170,7 @@ class AnthropicAuthenticatedClient extends anthropic.AnthropicClient {
   }
 }
 
-class _AnthropicAuthInterceptor implements InterceptorContract {
+class _AnthropicAuthInterceptor implements HttpInterceptor {
   final ClaudeCodeTokenStore tokenStore;
   final String betaHeader;
 
@@ -179,26 +178,28 @@ class _AnthropicAuthInterceptor implements InterceptorContract {
 
   @override
   FutureOr<BaseRequest> interceptRequest({required BaseRequest request}) async {
-    return request.copyWith(
-      headers: await AnthropicAuthenticatedClient._injectHeaders(
-        tokenStore,
-        betaHeader,
-        request.headers,
-      ),
+    final newHeaders = await AnthropicAuthenticatedClient._injectHeaders(
+      tokenStore,
+      betaHeader,
+      Map<String, String>.from(request.headers),
     );
+    request.headers
+      ..clear()
+      ..addAll(newHeaders);
+    return request;
   }
 
   @override
   FutureOr<BaseResponse> interceptResponse({required BaseResponse response}) async => response;
 
   @override
-  FutureOr<bool> shouldInterceptRequest() => true;
+  FutureOr<bool> shouldInterceptRequest({required BaseRequest request}) => true;
 
   @override
-  FutureOr<bool> shouldInterceptResponse() => false;
+  FutureOr<bool> shouldInterceptResponse({required BaseResponse response}) => false;
 }
 
-class LoggerInterceptor extends InterceptorContract {
+class LoggerInterceptor implements HttpInterceptor {
   @override
   Future<BaseRequest> interceptRequest({required BaseRequest request}) async {
     print('-' * 80);
@@ -206,23 +207,28 @@ class LoggerInterceptor extends InterceptorContract {
     print('-' * 80);
     _printHeaders(request.headers);
     print('-' * 80);
-    final updated = request.copyWith();
-    final stream = request.finalize();
-    Uint8List bodyBytes = await stream.toBytes();
-    final bodyString = utf8.decode(bodyBytes);
-    print('BODY:');
-    if (request.headers[HttpHeaders.contentTypeHeader]?.contains('application/json') == true) {
-      final json = jsonDecode(bodyString);
-      if (json != null) {
-        print(const JsonEncoder.withIndent('  ').convert(json));
+    if (request is http.Request) {
+      print('BODY:');
+      final bodyString = request.body;
+      if (request.headers[HttpHeaders.contentTypeHeader]?.contains('application/json') == true) {
+        final json = jsonDecode(bodyString);
+        if (json != null) {
+          print(const JsonEncoder.withIndent('  ').convert(json));
+        } else {
+          print(bodyString);
+        }
       } else {
         print(bodyString);
       }
-    } else {
-      print(bodyString);
     }
-    return updated;
+    return request;
   }
+
+  @override
+  FutureOr<bool> shouldInterceptRequest({required BaseRequest request}) => true;
+
+  @override
+  FutureOr<bool> shouldInterceptResponse({required BaseResponse response}) => true;
 
   @override
   Future<BaseResponse> interceptResponse({required BaseResponse response}) async {
