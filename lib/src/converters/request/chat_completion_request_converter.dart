@@ -119,8 +119,15 @@ class ChatCompletionRequestConverter {
     // JSON schema structured output is required.
     final skipThinking = useAdaptiveThinking && responseFormat is JsonSchemaResponseFormat;
 
-    // Build system prompt — for OAuth, prepend Claude Code identity with cache_control.
-    // Cache control respects the retention policy (#9).
+    // Build system prompt.
+    //
+    // Cache control is a feature of the Anthropic API itself and works
+    // identically whether the request is authenticated via x-api-key or OAuth
+    // (https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+    // It is therefore gated solely on [cacheRetention] (#9).
+    //
+    // The Claude Code identity prefix is OAuth-specific (required for Sonnet/
+    // Opus OAuth access) and remains gated on [isOAuth].
     //
     // Reference: claude-code/src/services/api/claude.ts
     //   getCacheControl()           — lines 358-374 (builds {type:'ephemeral', ttl?, scope?})
@@ -128,7 +135,8 @@ class ChatCompletionRequestConverter {
     //
     // Differences from reference:
     //   - Claude Code splits into up to 4 blocks with global/org/null scopes.
-    //     We use 2 blocks (identity + user prompt), both with the same retention.
+    //     We use at most 2 blocks (identity + user prompt), both with the same
+    //     retention. Direct-API path uses 1 block (user prompt only).
     //   - Claude Code supports scope:'global' and scope:'org' for cross-session
     //     sharing. We don't implement scopes yet.
     final cacheControl = cacheRetention == CacheRetention.none
@@ -137,20 +145,24 @@ class ChatCompletionRequestConverter {
             ttl: cacheRetention == CacheRetention.long ? anthropic.CacheTtl.ttl1h : null,
           );
 
+    final shouldUseSystemBlocks = isOAuth || cacheControl != null;
     anthropic.SystemPrompt? system;
-    if (isOAuth) {
+    if (shouldUseSystemBlocks) {
       final blocks = <anthropic.SystemTextBlock>[
-        anthropic.SystemTextBlock(
-          text: _claudeCodeIdentity,
-          cacheControl: cacheControl,
-        ),
+        if (isOAuth)
+          anthropic.SystemTextBlock(
+            text: _claudeCodeIdentity,
+            cacheControl: cacheControl,
+          ),
         if (systemPrompt != null)
           anthropic.SystemTextBlock(
             text: systemPrompt,
             cacheControl: cacheControl,
           ),
       ];
-      system = anthropic.SystemPrompt.blocks(blocks);
+      // If neither identity nor user system prompt exists, leave system null
+      // rather than emitting an empty blocks list (rejected by the API).
+      system = blocks.isEmpty ? null : anthropic.SystemPrompt.blocks(blocks);
     } else {
       system = systemPrompt != null ? anthropic.SystemPrompt.text(systemPrompt) : null;
     }
@@ -185,15 +197,23 @@ class ChatCompletionRequestConverter {
       );
     }
 
-    // For OAuth without a bodyTransformer, auto-apply cache breakpoints
-    // and thinking via the JSON round-trip.
-    if (isOAuth) {
+    // Auto-apply OAuth-specific request features (adaptive thinking) and
+    // last-message cache_control via a single JSON round-trip when no caller-
+    // supplied bodyTransformer has done the work for us.
+    //
+    // The two concerns are independent:
+    //   * Thinking + effort_config are OAuth-only (require Claude Code beta
+    //     headers).
+    //   * cache_control on the last message is auth-agnostic — Anthropic's
+    //     caching API treats x-api-key and OAuth Bearer identically.
+    final needsThinkingInjection = isOAuth && useAdaptiveThinking && !skipThinking;
+    final needsCacheInjection = cacheControl != null;
+
+    if (needsThinkingInjection || needsCacheInjection) {
       final body = anthropicRequest.toJson();
       bool modified = false;
 
-      // Inject adaptive thinking for 4.6 models — but skip when JSON schema
-      // output requires forced tool choice (incompatible with thinking).
-      if (useAdaptiveThinking && !skipThinking && !body.containsKey('thinking')) {
+      if (needsThinkingInjection && !body.containsKey('thinking')) {
         body['thinking'] = {'type': 'adaptive'};
         // Inject default effort alongside adaptive thinking to prevent
         // unbounded thinking loops. Without effort, the API defaults to 'high'
@@ -206,7 +226,7 @@ class ChatCompletionRequestConverter {
       }
 
       // Apply cache_control to the last message's last content block.
-      // Respects cacheRetention (#9).
+      // Respects cacheRetention (#9). Works on both OAuth and direct API paths.
       //
       // Reference: claude-code/src/services/api/claude.ts
       //   addCacheBreakpoints()            — lines 3063-3211
@@ -224,56 +244,58 @@ class ChatCompletionRequestConverter {
       //   - For array content, marker goes on the last non-thinking block
       //     (ref: assistantMessageToMessageParam lines 658-661 skips
       //     'thinking' and 'redacted_thinking').
-      final ccJson = cacheControl?.toJson();
-      final msgs = body['messages'];
-      if (ccJson != null && msgs is List) {
-        for (int i = msgs.length - 1; i >= 0; i--) {
-          final msg = msgs[i];
-          if (msg is! Map) continue;
-          final content = msg['content'];
+      if (needsCacheInjection) {
+        final ccJson = cacheControl.toJson();
+        final msgs = body['messages'];
+        if (msgs is List) {
+          for (int i = msgs.length - 1; i >= 0; i--) {
+            final msg = msgs[i];
+            if (msg is! Map) continue;
+            final content = msg['content'];
 
-          // String content → wrap to block format with cache_control.
-          // Ref: userMessageToMessageParam lines 595-607 (string branch)
-          if (content is String && content.isNotEmpty) {
-            msg['content'] = [
-              {
-                'type': 'text',
-                'text': content,
-                'cache_control': ccJson,
-              },
-            ];
-            modified = true;
-            break;
-          } else if (content is List && content.isNotEmpty) {
-            // Array content → walk backward to find last non-thinking block.
-            // Ref: assistantMessageToMessageParam lines 656-665
-            //   (skips 'thinking' and 'redacted_thinking')
-            //
-            // Intentional divergence from reference: the TS code targets
-            // the absolute last block and silently skips the message if
-            // it's a thinking block. We walk backward, which is more
-            // defensive — we'll always find a cacheable block if one
-            // exists. Also omits 'connector_text' exclusion (ref line
-            // 661, feature-gated in TS, not yet shipped).
-            for (int j = content.length - 1; j >= 0; j--) {
-              final block = content[j];
-              if (block is! Map) continue;
-              final blockType = block['type'];
-              if (blockType == 'thinking' || blockType == 'redacted_thinking') {
-                continue;
-              }
-              if (!block.containsKey('cache_control')) {
-                content[j] = <String, dynamic>{
-                  for (final e in block.entries) e.key as String: e.value,
+            // String content → wrap to block format with cache_control.
+            // Ref: userMessageToMessageParam lines 595-607 (string branch)
+            if (content is String && content.isNotEmpty) {
+              msg['content'] = [
+                {
+                  'type': 'text',
+                  'text': content,
                   'cache_control': ccJson,
-                };
-                modified = true;
+                },
+              ];
+              modified = true;
+              break;
+            } else if (content is List && content.isNotEmpty) {
+              // Array content → walk backward to find last non-thinking block.
+              // Ref: assistantMessageToMessageParam lines 656-665
+              //   (skips 'thinking' and 'redacted_thinking')
+              //
+              // Intentional divergence from reference: the TS code targets
+              // the absolute last block and silently skips the message if
+              // it's a thinking block. We walk backward, which is more
+              // defensive — we'll always find a cacheable block if one
+              // exists. Also omits 'connector_text' exclusion (ref line
+              // 661, feature-gated in TS, not yet shipped).
+              for (int j = content.length - 1; j >= 0; j--) {
+                final block = content[j];
+                if (block is! Map) continue;
+                final blockType = block['type'];
+                if (blockType == 'thinking' || blockType == 'redacted_thinking') {
+                  continue;
+                }
+                if (!block.containsKey('cache_control')) {
+                  content[j] = <String, dynamic>{
+                    for (final e in block.entries) e.key as String: e.value,
+                    'cache_control': ccJson,
+                  };
+                  modified = true;
+                }
+                break;
               }
               break;
             }
-            break;
+            // Empty/null content — try previous message
           }
-          // Empty/null content — try previous message
         }
       }
 

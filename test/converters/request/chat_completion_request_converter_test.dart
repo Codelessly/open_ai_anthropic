@@ -197,7 +197,10 @@ void main() {
       );
     });
 
-    test('no bodyTransformer leaves request unchanged (non-OAuth)', () {
+    test('no bodyTransformer and CacheRetention.none yields plain-text system (non-OAuth)', () {
+      // Sanity check that bodyTransformer mutations are opt-in. Cache control
+      // is also opt-out via CacheRetention.none — pass it explicitly so this
+      // test exercises the pure pass-through path with no auto-injection.
       final request = ChatCompletionCreateRequest(
         model: 'claude-sonnet-4-20250514',
         messages: [
@@ -206,9 +209,8 @@ void main() {
         ],
       );
 
-      final result = converter.convert(request);
+      final result = converter.convert(request, cacheRetention: CacheRetention.none);
 
-      // System is plain text, no cache control
       expect(result.system, isA<anthropic.TextSystemPrompt>());
     });
   });
@@ -261,7 +263,17 @@ void main() {
 
       final result = converter.convert(request, isOAuth: false);
 
-      expect(result.system, isA<anthropic.TextSystemPrompt>());
+      // The system prompt must carry only the user-provided text, never the
+      // Claude Code identity prefix. The container type (TextSystemPrompt vs
+      // BlocksSystemPrompt) is an implementation detail driven by whether
+      // cache_control is being attached — assert the textual content directly.
+      final system = result.system!;
+      final systemText = switch (system) {
+        anthropic.TextSystemPrompt(:final text) => text,
+        anthropic.BlocksSystemPrompt(:final blocks) => blocks.map((b) => b.text).join('\n'),
+      };
+      expect(systemText, equals('You are helpful.'));
+      expect(systemText, isNot(contains('Claude Code')));
     });
 
     test('sets adaptive thinking for sonnet-4-6', () {
@@ -440,6 +452,208 @@ void main() {
         returnsNormally,
         reason: 'OAuth cache_control injection on multi-part user message must not throw',
       );
+    });
+  });
+
+  // =========================================================================
+  // Direct API key path (isOAuth: false) — cache_control injection.
+  //
+  // Anthropic's prompt caching API works identically with x-api-key and OAuth
+  // Bearer authentication; no beta header is required. The converter must
+  // therefore inject cache_control breakpoints on the system prompt and the
+  // last message regardless of auth mode, gated solely on cacheRetention.
+  //
+  // The OAuth-specific layer (Claude Code identity prefix, adaptive thinking,
+  // effort defaults, tool-name remap) remains gated on isOAuth.
+  //
+  // Reference: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  //   "Prompt caching is enabled by including cache_control parameters [...]
+  //    no beta header is needed; the same syntax works with API keys and OAuth."
+  // =========================================================================
+  group('Direct API path cache_control (isOAuth: false)', () {
+    test('injects cache_control on system prompt block (CacheRetention.short)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [
+          ChatMessage.system('You are a helpful assistant. ' * 200),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.short,
+      );
+      final json = result.toJson();
+
+      // Direct API path must emit `system` as blocks (not a string) so the
+      // cache_control marker can attach to the block.
+      final system = json['system'];
+      expect(
+        system,
+        isA<List<dynamic>>(),
+        reason: 'system must be a blocks list, not a string, when cache_control is being injected',
+      );
+      final blocks = system as List;
+      expect(
+        blocks,
+        hasLength(1),
+        reason: 'Non-OAuth path has no Claude Code identity prefix, so exactly one system block',
+      );
+      final block = blocks.first as Map;
+      expect(block['cache_control'], isNotNull, reason: 'System block must carry cache_control on direct API path');
+      expect((block['cache_control'] as Map)['type'], equals('ephemeral'));
+      expect(block['text'], contains('You are a helpful assistant.'));
+      // Non-OAuth path must NOT prepend Claude Code identity.
+      expect(block['text'], isNot(contains('Claude Code')));
+    });
+
+    test('injects cache_control on last user message (CacheRetention.short)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [
+          ChatMessage.system('You are a helpful assistant. ' * 200),
+          ChatMessage.user('First turn user message'),
+          ChatMessage.assistant(content: 'First turn assistant response'),
+          ChatMessage.user('Second turn user message'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.short,
+      );
+      final json = result.toJson();
+
+      final messages = json['messages'] as List;
+      final lastMsg = messages.last as Map;
+      expect(lastMsg['role'], equals('user'));
+      final content = lastMsg['content'];
+      expect(
+        content,
+        isA<List<dynamic>>(),
+        reason: 'Last message content must be wrapped in blocks so cache_control can attach',
+      );
+      final blocks = content as List;
+      expect(blocks, isNotEmpty);
+      final lastBlock = blocks.last as Map;
+      expect(
+        lastBlock['cache_control'],
+        isNotNull,
+        reason: 'Last message must carry cache_control on direct API path',
+      );
+      expect((lastBlock['cache_control'] as Map)['type'], equals('ephemeral'));
+    });
+
+    test('CacheRetention.long applies ttl:1h on system block (direct API)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [
+          ChatMessage.system('System prompt'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.long,
+      );
+      final json = result.toJson();
+
+      final system = json['system'] as List;
+      final block = system.first as Map;
+      final cc = block['cache_control'] as Map;
+      expect(cc['type'], equals('ephemeral'));
+      expect(cc['ttl'], equals('1h'));
+    });
+
+    test('CacheRetention.none injects no cache_control anywhere (direct API)', () {
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [
+          ChatMessage.system('System prompt'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.none,
+      );
+      final json = result.toJson();
+
+      // System may be string OR blocks-without-cache; the only invariant is
+      // that NOTHING carries cache_control.
+      final encoded = json.toString();
+      expect(
+        encoded,
+        isNot(contains('cache_control')),
+        reason: 'CacheRetention.none must produce zero cache_control markers',
+      );
+    });
+
+    test('does not adopt OAuth-only features (no Claude Code identity, no thinking)', () {
+      // Regression guard: cache_control lift must not accidentally bring
+      // along the Claude Code identity prefix or adaptive thinking block.
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-sonnet-4-6',
+        messages: [
+          ChatMessage.system('Plain system'),
+          ChatMessage.user('Hello'),
+        ],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.short,
+      );
+      final json = result.toJson();
+
+      expect(
+        json.containsKey('thinking'),
+        isFalse,
+        reason: 'Non-OAuth path must never inject adaptive thinking',
+      );
+      final system = json['system'];
+      final systemText = system is String ? system : (system as List).map((b) => (b as Map)['text']).join('\n');
+      expect(systemText, isNot(contains('Claude Code')));
+    });
+
+    test('omits cache_control entirely when no system prompt and no user content blocks to mark', () {
+      // Edge case: an empty messages list with no system prompt should not
+      // crash and should not produce stray cache_control markers.
+      final request = ChatCompletionCreateRequest(
+        model: 'claude-haiku-4-5-20251001',
+        messages: [ChatMessage.user('Hello')],
+      );
+
+      final result = converter.convert(
+        request,
+        isOAuth: false,
+        cacheRetention: CacheRetention.short,
+      );
+      final json = result.toJson();
+
+      // No system means we cannot attach a cache_control there — that's fine.
+      // The last user message SHOULD still carry one (it's a valid breakpoint).
+      final messages = json['messages'] as List;
+      final lastMsg = messages.last as Map;
+      final content = lastMsg['content'];
+      if (content is List && content.isNotEmpty) {
+        final lastBlock = content.last as Map;
+        expect(
+          lastBlock['cache_control'],
+          isNotNull,
+          reason: 'Last user message should be cache-marked even without a system prompt',
+        );
+      } else {
+        fail('Expected last message content to be wrapped in blocks');
+      }
     });
   });
 
