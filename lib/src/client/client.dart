@@ -71,6 +71,16 @@ class AnthropicOpenAIClient extends OpenAIClient {
   /// When true, enables Claude Code compatibility in request conversion.
   final bool isOAuth;
 
+  /// Prompt-cache policy applied to the NEXT converted request.
+  ///
+  /// Mutable and read per-call by the chat resource (one HTTP call per
+  /// `create`/`createStream`), so a caller can set it immediately before
+  /// dispatching a request to skip the Anthropic 1.25× cache-WRITE premium on
+  /// one-shot / text-only roles that read zero cached tokens. Defaults to
+  /// [CacheRetention.short] — unchanged caching behavior for callers that
+  /// never touch it.
+  CacheRetention cacheRetention = CacheRetention.short;
+
   /// Optional callback to mutate the Anthropic request body before sending.
   final BodyTransformer? bodyTransformer;
 
@@ -118,13 +128,16 @@ class AnthropicOpenAIClient extends OpenAIClient {
     this.bodyTransformer,
     this.responseBodyTransformer,
     String? defaultEffort = kDefaultAdaptiveEffort,
+    // Optional override for the request converter. Defaults to a standard
+    // converter; injectable so tests can observe the threaded [cacheRetention].
+    ChatCompletionRequestConverter? requestConverter,
   }) : _apiKey = apiKey,
        _baseUrl = baseUrl,
        _headers = headers,
        _queryParams = queryParams,
        _retries = retries,
        _ownHttpClient = client,
-       _requestConverter = ChatCompletionRequestConverter(defaultEffort: defaultEffort),
+       _requestConverter = requestConverter ?? ChatCompletionRequestConverter(defaultEffort: defaultEffort),
        _responseConverter = ChatCompletionResponseConverter(),
        super(httpClient: client) {
     _resourceHttpClient = client ?? http.Client();
@@ -166,6 +179,10 @@ class AnthropicOpenAIClient extends OpenAIClient {
     isOAuth: isOAuth,
     bodyTransformer: bodyTransformer,
     responseBodyTransformer: responseBodyTransformer,
+    // Read the field per-call (the resource is memoized but caching policy is
+    // per-request) so a caller mutating `cacheRetention` between requests is
+    // honored on the very next dispatch.
+    cacheRetention: () => cacheRetention,
     // These base resource fields are required by the parent class but unused
     // since our overridden create()/createStream() bypass OpenAI's HTTP pipeline.
     config: config,
@@ -278,10 +295,14 @@ class _AnthropicChatResource extends ChatResource {
   final BodyTransformer? bodyTransformer;
   final BodyTransformer? responseBodyTransformer;
 
+  /// Per-call prompt-cache policy, read fresh on each `create`/`createStream`.
+  final CacheRetention Function() cacheRetention;
+
   _AnthropicChatResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    required this.cacheRetention,
     this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
@@ -298,6 +319,7 @@ class _AnthropicChatResource extends ChatResource {
     anthropicClient: anthropicClient,
     requestConverter: requestConverter,
     responseConverter: responseConverter,
+    cacheRetention: cacheRetention,
     isOAuth: isOAuth,
     bodyTransformer: bodyTransformer,
     responseBodyTransformer: responseBodyTransformer,
@@ -316,10 +338,14 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
   final BodyTransformer? bodyTransformer;
   final BodyTransformer? responseBodyTransformer;
 
+  /// Per-call prompt-cache policy, read fresh on each `create`/`createStream`.
+  final CacheRetention Function() cacheRetention;
+
   _AnthropicChatCompletionsResource({
     required this.anthropicClient,
     required this.requestConverter,
     required this.responseConverter,
+    required this.cacheRetention,
     this.isOAuth = false,
     this.bodyTransformer,
     this.responseBodyTransformer,
@@ -335,7 +361,12 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) async {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
+    final anthropicRequest = requestConverter.convert(
+      request,
+      bodyTransformer: bodyTransformer,
+      isOAuth: isOAuth,
+      cacheRetention: cacheRetention(),
+    );
     final betas = isOAuth ? kThinkingBetaHeaders : const <String>[];
     final anthropicResponse = await anthropicClient.messages.create(anthropicRequest, betas: betas);
     final originalToolNames = isOAuth ? request.tools?.map((t) => t.function.name).toList() : null;
@@ -364,7 +395,12 @@ class _AnthropicChatCompletionsResource extends ChatCompletionsResource {
     Future<void>? abortTrigger,
   }) {
     final requestModel = request.model;
-    final anthropicRequest = requestConverter.convert(request, bodyTransformer: bodyTransformer, isOAuth: isOAuth);
+    final anthropicRequest = requestConverter.convert(
+      request,
+      bodyTransformer: bodyTransformer,
+      isOAuth: isOAuth,
+      cacheRetention: cacheRetention(),
+    );
     final originalToolNames = isOAuth ? request.tools?.map((t) => t.function.name).toList() : null;
     final transformer = StreamEventTransformer(
       requestModel: requestModel,
