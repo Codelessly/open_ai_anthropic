@@ -113,11 +113,18 @@ class ChatCompletionRequestConverter {
       toolChoice = anthropic.ToolChoice.tool(jsonSchemaToolName);
     }
 
-    // Forced tool choice (tool, any) is incompatible with extended thinking.
+    // Forced tool choice (tool, any) is incompatible with extended thinking,
+    // regardless of which thinking mode is requested (enabled / adaptive).
     // Only tool_choice: auto works with thinking. Since auto doesn't guarantee
     // the model calls the JSON schema tool, we disable thinking instead when
     // JSON schema structured output is required.
-    final skipThinking = useAdaptiveThinking && responseFormat is JsonSchemaResponseFormat;
+    //
+    // This applies to ANY thinking source — both the auto-injected adaptive
+    // thinking (OAuth 4.6 models) and explicit thinking arriving via
+    // `bodyTransformer` (e.g. `AnthropicReasoningConfig` flowing through
+    // `extraBody['thinking']`). The bodyTransformer block below strips any
+    // pre-injected `thinking`/`output_config` when this flag is true.
+    final skipThinking = responseFormat is JsonSchemaResponseFormat;
 
     // Build system prompt.
     //
@@ -188,10 +195,20 @@ class ChatCompletionRequestConverter {
       metadata: metadata,
     );
 
-    // Apply body transformer if provided (e.g. for cache breakpoints).
-    if (bodyTransformer != null) {
+    // Apply body transformer if provided (e.g. for cache breakpoints, or
+    // injecting `thinking` / `output_config` from `extraBody`).
+    //
+    // If JSON schema structured output is active (`skipThinking == true`),
+    // strip any `thinking` / `output_config` the transformer may have
+    // injected — Anthropic 400s when forced `tool_choice` (the JSON-schema
+    // tool) coexists with extended thinking.
+    if (bodyTransformer != null || skipThinking) {
       final body = anthropicRequest.toJson();
-      bodyTransformer(body);
+      bodyTransformer?.call(body);
+      if (skipThinking) {
+        body.remove('thinking');
+        body.remove('output_config');
+      }
       anthropicRequest = anthropic.MessageCreateRequest.fromJson(
         _deepCastJson(body),
       );

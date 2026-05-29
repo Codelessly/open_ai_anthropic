@@ -895,5 +895,136 @@ void main() {
       expect(json['thinking'], isNotNull);
       expect((json['thinking'] as Map)['type'], 'adaptive');
     });
+
+    // Regression: explicit `thinking` injected via bodyTransformer
+    // (e.g. from `AnthropicReasoningConfig(thinkingMode: enabled, ...)`
+    // flowing through `extraBody['thinking']`) must ALSO be stripped when
+    // JSON schema structured output is active — otherwise Anthropic 400s:
+    //   "Thinking may not be enabled when tool_choice forces tool use."
+    test(
+      'strips explicit thinking (bodyTransformer-injected) when jsonSchema is active — OAuth path',
+      () {
+        final request = ChatCompletionCreateRequest(
+          model: 'claude-sonnet-4-6',
+          messages: [
+            ChatMessage.system('You are helpful.'),
+            ChatMessage.user('Hello'),
+          ],
+          responseFormat: ResponseFormat.jsonSchema(
+            name: 'TestResponse',
+            strict: false,
+            schema: {
+              'type': 'object',
+              'properties': {
+                'answer': {'type': 'string'},
+              },
+            },
+          ),
+        );
+
+        final result = converter.convert(
+          request,
+          isOAuth: true,
+          // Simulates `_AnthropicRequestOverrides.applyToBody` writing
+          // explicit `thinking` (from `AnthropicReasoningConfig`) and
+          // `output_config` (from `effort`) into the body.
+          bodyTransformer: (body) {
+            body['thinking'] = {'type': 'enabled', 'budget_tokens': 10240};
+            body['output_config'] = {'effort': 'medium'};
+          },
+        );
+
+        final json = result.toJson();
+        expect(
+          json.containsKey('thinking'),
+          isFalse,
+          reason:
+              'Explicit thinking from bodyTransformer must be stripped when JSON schema forces tool choice',
+        );
+        expect(
+          json.containsKey('output_config'),
+          isFalse,
+          reason:
+              'output_config (effort) must be stripped alongside thinking when JSON schema forces tool choice',
+        );
+
+        // System prompt must still be preserved (Claude Code identity + user system block).
+        expect(result.system, isNotNull);
+
+        // Forced tool_choice (the JSON schema tool) must still be set.
+        expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
+
+        // The JSON schema tool must still be present.
+        final toolNames = result.tools!.map((t) {
+          if (t is anthropic.CustomToolDefinition) return t.tool.name;
+          return null;
+        }).toList();
+        expect(toolNames, contains(jsonSchemaToolName));
+      },
+    );
+
+    test(
+      'strips explicit thinking (bodyTransformer-injected) when jsonSchema is active — direct-API path',
+      () {
+        final request = ChatCompletionCreateRequest(
+          model: 'claude-sonnet-4-6',
+          messages: [ChatMessage.user('Hello')],
+          responseFormat: ResponseFormat.jsonSchema(
+            name: 'TestResponse',
+            strict: false,
+            schema: {
+              'type': 'object',
+              'properties': {
+                'answer': {'type': 'string'},
+              },
+            },
+          ),
+        );
+
+        final result = converter.convert(
+          request,
+          isOAuth: false,
+          bodyTransformer: (body) {
+            body['thinking'] = {'type': 'enabled', 'budget_tokens': 10240};
+          },
+        );
+
+        final json = result.toJson();
+        expect(
+          json.containsKey('thinking'),
+          isFalse,
+          reason:
+              'Explicit thinking must be stripped in direct-API (x-api-key) path too',
+        );
+        expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
+      },
+    );
+
+    test(
+      'preserves explicit thinking (bodyTransformer-injected) when jsonSchema is NOT active',
+      () {
+        // Sanity check: the strip only fires when JSON schema is in play.
+        final request = ChatCompletionCreateRequest(
+          model: 'claude-haiku-4-5-20251001',
+          messages: [ChatMessage.user('Hello')],
+        );
+
+        final result = converter.convert(
+          request,
+          isOAuth: false,
+          bodyTransformer: (body) {
+            body['thinking'] = {'type': 'enabled', 'budget_tokens': 4096};
+            body['output_config'] = {'effort': 'high'};
+          },
+        );
+
+        final json = result.toJson();
+        expect(json['thinking'], isNotNull);
+        expect((json['thinking'] as Map)['type'], 'enabled');
+        expect((json['thinking'] as Map)['budget_tokens'], 4096);
+        expect(json['output_config'], isNotNull);
+        expect((json['output_config'] as Map)['effort'], 'high');
+      },
+    );
   });
 }
