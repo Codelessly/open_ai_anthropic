@@ -285,6 +285,137 @@ void main() {
       expect(usageJson.containsKey('cache_read_input_tokens'), isFalse);
     });
 
+    test('does NOT emit a tool_call for native server tools (web_search)', () async {
+      // Anthropic's native server tools (web_search, web_fetch, code_execution)
+      // run server-side with NO client handshake (Anthropic emits end_turn, not
+      // tool_use). They must NOT surface as client function tool_calls, or the
+      // downstream agent loop will try to execute a non-existent client tool.
+      final transformer = StreamEventTransformer(requestModel: 'claude-sonnet-4-20250514');
+
+      final events = [
+        anthropic.MessageStartEvent(
+          message: anthropic.Message(
+            id: 'msg_native',
+            type: 'message',
+            role: anthropic.MessageRole.assistant,
+            content: [],
+            model: 'claude-sonnet-4-20250514',
+            stopReason: null,
+            usage: anthropic.Usage(inputTokens: 100, outputTokens: 0),
+          ),
+        ),
+        // Native server tool block — must produce NO tool_call.
+        anthropic.ContentBlockStartEvent(
+          index: 0,
+          contentBlock: anthropic.ServerToolUseBlock(
+            id: 'srvtoolu_websearch',
+            name: 'web_search',
+            input: const {'query': 'dart language'},
+          ),
+        ),
+        anthropic.ContentBlockDeltaEvent(
+          index: 0,
+          delta: anthropic.InputJsonDelta('{"query": "dart language"}'),
+        ),
+        anthropic.ContentBlockStopEvent(index: 0),
+        // A following text block must still flow through normally.
+        anthropic.ContentBlockStartEvent(
+          index: 1,
+          contentBlock: anthropic.TextBlock(text: ''),
+        ),
+        anthropic.ContentBlockDeltaEvent(
+          index: 1,
+          delta: anthropic.TextDelta('Here is the answer.'),
+        ),
+        anthropic.ContentBlockStopEvent(index: 1),
+        anthropic.MessageDeltaEvent(
+          delta: anthropic.MessageDelta(stopReason: anthropic.StopReason.endTurn),
+          usage: anthropic.MessageDeltaUsage(outputTokens: 5),
+        ),
+        anthropic.MessageStopEvent(),
+      ];
+
+      final controller = StreamController<anthropic.MessageStreamEvent>();
+      final outputEvents = <ChatStreamEvent>[];
+
+      controller.stream.transform(transformer).listen(outputEvents.add);
+      for (final event in events) {
+        controller.add(event);
+      }
+      await controller.close();
+
+      // No output chunk should carry any tool_call delta.
+      final toolCalls = outputEvents
+          .expand((e) => e.choices ?? <ChatStreamChoice>[])
+          .expand((c) => c.delta.toolCalls ?? <ToolCallDelta>[])
+          .toList();
+      expect(
+        toolCalls,
+        isEmpty,
+        reason: 'native server tools must not surface as client tool_calls',
+      );
+
+      // The text content from the following block must still flow.
+      final text = outputEvents
+          .expand((e) => e.choices ?? <ChatStreamChoice>[])
+          .map((c) => c.delta.content ?? '')
+          .join();
+      expect(text, contains('Here is the answer.'));
+    });
+
+    test('STILL emits a tool_call for a non-native server tool', () async {
+      // Only native no-handshake tools are gated. Other (handshake-style) server
+      // tools must continue to surface as client tool_calls.
+      final transformer = StreamEventTransformer(requestModel: 'claude-sonnet-4-20250514');
+
+      final events = [
+        anthropic.MessageStartEvent(
+          message: anthropic.Message(
+            id: 'msg_mcp',
+            type: 'message',
+            role: anthropic.MessageRole.assistant,
+            content: [],
+            model: 'claude-sonnet-4-20250514',
+            stopReason: null,
+            usage: anthropic.Usage(inputTokens: 100, outputTokens: 0),
+          ),
+        ),
+        anthropic.ContentBlockStartEvent(
+          index: 0,
+          contentBlock: anthropic.ServerToolUseBlock(
+            id: 'srvtoolu_mcp',
+            name: 'some_mcp_tool',
+            input: const {'arg': 1},
+          ),
+        ),
+        anthropic.ContentBlockStopEvent(index: 0),
+        anthropic.MessageDeltaEvent(
+          delta: anthropic.MessageDelta(stopReason: anthropic.StopReason.toolUse),
+          usage: anthropic.MessageDeltaUsage(outputTokens: 5),
+        ),
+        anthropic.MessageStopEvent(),
+      ];
+
+      final controller = StreamController<anthropic.MessageStreamEvent>();
+      final outputEvents = <ChatStreamEvent>[];
+
+      controller.stream.transform(transformer).listen(outputEvents.add);
+      for (final event in events) {
+        controller.add(event);
+      }
+      await controller.close();
+
+      final toolCalls = outputEvents
+          .expand((e) => e.choices ?? <ChatStreamChoice>[])
+          .expand((c) => c.delta.toolCalls ?? <ToolCallDelta>[])
+          .toList();
+      expect(
+        toolCalls.map((t) => t.function?.name),
+        contains('some_mcp_tool'),
+        reason: 'non-native server tools must still emit a client tool_call',
+      );
+    });
+
     test('reads cache creation from nested CacheCreation when flat field is null', () async {
       // Anthropic may return cache data only in the nested format:
       // cache_creation: {ephemeral_5m_input_tokens: N, ephemeral_1h_input_tokens: M}

@@ -230,7 +230,22 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
         ];
       }(),
       anthropic.ServerToolUseBlock(:final id, :final name) => () {
-        // Server tool use (e.g. MCP) is treated like a tool call
+        // Native server tools execute server-side with NO client handshake
+        // (Anthropic emits end_turn, not tool_use). They must NOT surface as
+        // client function tool_calls, or the agent loop will try to execute a
+        // non-existent client tool and discard the model's answer.
+        const nativeServerTools = {
+          'web_search',
+          'web_fetch',
+          'code_execution',
+          'bash_code_execution',
+          'text_editor_code_execution',
+        };
+        if (nativeServerTools.contains(name)) {
+          return <ChatStreamEvent>[];
+        }
+
+        // Other (handshake-style) server tools are treated like a tool call.
         final toolCallIndex = state.toolCallCount++;
         state.blockToolCallIndex[event.index] = toolCallIndex;
 

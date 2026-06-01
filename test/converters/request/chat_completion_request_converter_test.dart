@@ -938,14 +938,12 @@ void main() {
         expect(
           json.containsKey('thinking'),
           isFalse,
-          reason:
-              'Explicit thinking from bodyTransformer must be stripped when JSON schema forces tool choice',
+          reason: 'Explicit thinking from bodyTransformer must be stripped when JSON schema forces tool choice',
         );
         expect(
           json.containsKey('output_config'),
           isFalse,
-          reason:
-              'output_config (effort) must be stripped alongside thinking when JSON schema forces tool choice',
+          reason: 'output_config (effort) must be stripped alongside thinking when JSON schema forces tool choice',
         );
 
         // System prompt must still be preserved (Claude Code identity + user system block).
@@ -993,8 +991,7 @@ void main() {
         expect(
           json.containsKey('thinking'),
           isFalse,
-          reason:
-              'Explicit thinking must be stripped in direct-API (x-api-key) path too',
+          reason: 'Explicit thinking must be stripped in direct-API (x-api-key) path too',
         );
         expect(result.toolChoice, isA<anthropic.ToolChoiceTool>());
       },
