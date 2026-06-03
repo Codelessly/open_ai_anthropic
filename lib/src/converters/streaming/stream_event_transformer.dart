@@ -270,7 +270,28 @@ class _TransformingStream extends Stream<ChatStreamEvent> {
           ),
         ];
       }(),
-      // All other block types (WebSearchToolResult, CodeExecution, etc.)
+      anthropic.WebSearchToolResultBlock(:final content) => () {
+        // The native web_search server tool's RESULT block carries the actual
+        // sources (url + title per item). openai_dart's ChatDelta has no
+        // annotations field, so smuggle the results through a custom top-level
+        // `web_search_results` key that survives toJson() (the SAME round-trip
+        // trick the cache-token fields use). The client reads it back via
+        // `response.toJson()['web_search_results']`.
+        if (content is! anthropic.WebSearchResultSuccess) {
+          return <ChatStreamEvent>[];
+        }
+        final results = content.results.map((item) => {'url': item.url, 'title': item.title}).toList();
+        if (results.isEmpty) {
+          return <ChatStreamEvent>[];
+        }
+        return [
+          _WebSearchResultsChatStreamEvent(
+            base: _createResponse(state: state),
+            webSearchResults: results,
+          ),
+        ];
+      }(),
+      // All other block types (CodeExecution, etc.)
       _ => [],
     };
   }
@@ -426,6 +447,40 @@ class _AnthropicChatStreamEvent extends ChatStreamEvent {
         usage['cache_read_input_tokens'] = cacheReadInputTokens;
       }
     }
+    return json;
+  }
+}
+
+/// A [ChatStreamEvent] that injects native web-search results into its
+/// [toJson] output under a custom top-level `web_search_results` key.
+///
+/// openai_dart's typed `ChatDelta` has no annotations field, so the native
+/// Anthropic `web_search_tool_result` sources are smuggled here as
+/// `[{url, title}, …]`. The key survives `toJson()` (just like the
+/// Anthropic-specific cache token fields), and the client reads it back via
+/// `response.toJson()['web_search_results']`.
+class _WebSearchResultsChatStreamEvent extends ChatStreamEvent {
+  final List<Map<String, String>> webSearchResults;
+
+  _WebSearchResultsChatStreamEvent({
+    required ChatStreamEvent base,
+    required this.webSearchResults,
+  }) : super(
+         id: base.id,
+         object: base.object,
+         created: base.created,
+         model: base.model,
+         choices: base.choices,
+         usage: base.usage,
+         systemFingerprint: base.systemFingerprint,
+         serviceTier: base.serviceTier,
+         provider: base.provider,
+       );
+
+  @override
+  Map<String, dynamic> toJson() {
+    final json = super.toJson();
+    json['web_search_results'] = webSearchResults;
     return json;
   }
 }

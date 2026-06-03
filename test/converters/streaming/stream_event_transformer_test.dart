@@ -483,4 +483,129 @@ void main() {
       expect(usageEvent.usage!.promptTokens, 15100); // 100 + 15000
     });
   });
+
+  group('StreamEventTransformer web_search_tool_result surfacing', () {
+    test('surfaces WebSearchToolResultBlock items as top-level '
+        'web_search_results that survive toJson()', () async {
+      final transformer = StreamEventTransformer(requestModel: 'claude-sonnet-4-20250514');
+
+      final events = [
+        anthropic.MessageStartEvent(
+          message: anthropic.Message(
+            id: 'msg_websearch',
+            type: 'message',
+            role: anthropic.MessageRole.assistant,
+            content: [],
+            model: 'claude-sonnet-4-20250514',
+            stopReason: null,
+            usage: anthropic.Usage(inputTokens: 100, outputTokens: 0),
+          ),
+        ),
+        // The query block (ServerToolUseBlock) carries no result; surfaces nothing.
+        anthropic.ContentBlockStartEvent(
+          index: 0,
+          contentBlock: anthropic.ServerToolUseBlock(
+            id: 'srvtoolu_websearch',
+            name: 'web_search',
+            input: const {'query': 'dart language'},
+          ),
+        ),
+        anthropic.ContentBlockStopEvent(index: 0),
+        // The RESULT block carries url+title for each source.
+        anthropic.ContentBlockStartEvent(
+          index: 1,
+          contentBlock: anthropic.WebSearchToolResultBlock(
+            toolUseId: 'srvtoolu_websearch',
+            content: anthropic.WebSearchResultSuccess(
+              results: const [
+                anthropic.WebSearchResultItem(
+                  url: 'https://dart.dev',
+                  title: 'Dart programming language',
+                ),
+                anthropic.WebSearchResultItem(
+                  url: 'https://flutter.dev',
+                  title: 'Flutter',
+                ),
+              ],
+            ),
+          ),
+        ),
+        anthropic.ContentBlockStopEvent(index: 1),
+        anthropic.MessageDeltaEvent(
+          delta: anthropic.MessageDelta(stopReason: anthropic.StopReason.endTurn),
+          usage: anthropic.MessageDeltaUsage(outputTokens: 5),
+        ),
+        anthropic.MessageStopEvent(),
+      ];
+
+      final controller = StreamController<anthropic.MessageStreamEvent>();
+      final outputEvents = <ChatStreamEvent>[];
+
+      controller.stream.transform(transformer).listen(outputEvents.add);
+      for (final event in events) {
+        controller.add(event);
+      }
+      await controller.close();
+
+      // Exactly one chunk must carry web_search_results in its toJson().
+      final resultsChunks = outputEvents.where((e) => e.toJson().containsKey('web_search_results')).toList();
+      expect(resultsChunks, hasLength(1));
+
+      expect(
+        resultsChunks.single.toJson()['web_search_results'],
+        [
+          {'url': 'https://dart.dev', 'title': 'Dart programming language'},
+          {'url': 'https://flutter.dev', 'title': 'Flutter'},
+        ],
+        reason:
+            'web_search_results must survive toJson() (the round-trip the '
+            'client reads via response.toJson())',
+      );
+    });
+
+    test('does NOT surface web_search_results for an error result block', () async {
+      final transformer = StreamEventTransformer(requestModel: 'claude-sonnet-4-20250514');
+
+      final events = [
+        anthropic.MessageStartEvent(
+          message: anthropic.Message(
+            id: 'msg_websearch_err',
+            type: 'message',
+            role: anthropic.MessageRole.assistant,
+            content: [],
+            model: 'claude-sonnet-4-20250514',
+            stopReason: null,
+            usage: anthropic.Usage(inputTokens: 100, outputTokens: 0),
+          ),
+        ),
+        anthropic.ContentBlockStartEvent(
+          index: 0,
+          contentBlock: anthropic.WebSearchToolResultBlock(
+            toolUseId: 'srvtoolu_err',
+            content: const anthropic.WebSearchResultError(
+              errorCode: 'max_uses_exceeded',
+            ),
+          ),
+        ),
+        anthropic.ContentBlockStopEvent(index: 0),
+        anthropic.MessageDeltaEvent(
+          delta: anthropic.MessageDelta(stopReason: anthropic.StopReason.endTurn),
+          usage: anthropic.MessageDeltaUsage(outputTokens: 5),
+        ),
+        anthropic.MessageStopEvent(),
+      ];
+
+      final controller = StreamController<anthropic.MessageStreamEvent>();
+      final outputEvents = <ChatStreamEvent>[];
+
+      controller.stream.transform(transformer).listen(outputEvents.add);
+      for (final event in events) {
+        controller.add(event);
+      }
+      await controller.close();
+
+      final resultsChunks = outputEvents.where((e) => e.toJson().containsKey('web_search_results')).toList();
+      expect(resultsChunks, isEmpty);
+    });
+  });
 }
