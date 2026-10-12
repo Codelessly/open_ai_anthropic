@@ -1,3 +1,8 @@
+## Unreleased
+
+- Update `anthropic_sdk_dart` to `^9.0.0` and `openai_dart` to `^11.0.1`.
+- Require Dart `^3.13.0`.
+
 ## 0.3.0
 
 - Add short-lived and long-lived OAuth2 credentials with auto-detection and refresh logic.

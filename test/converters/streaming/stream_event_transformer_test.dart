@@ -583,7 +583,7 @@ void main() {
           contentBlock: anthropic.WebSearchToolResultBlock(
             toolUseId: 'srvtoolu_err',
             content: const anthropic.WebSearchResultError(
-              errorCode: 'max_uses_exceeded',
+              rawErrorCode: 'max_uses_exceeded',
             ),
           ),
         ),
